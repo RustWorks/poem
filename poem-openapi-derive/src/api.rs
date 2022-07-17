@@ -51,6 +51,8 @@ struct APIOperation {
     response_headers: Vec<ExtraHeader>,
     #[darling(default, multiple, rename = "request_header")]
     request_headers: Vec<ExtraHeader>,
+    #[darling(default)]
+    actual_type: Option<Type>,
 }
 
 #[derive(FromMeta, Default)]
@@ -182,6 +184,7 @@ fn generate_operation(
         external_docs,
         response_headers,
         request_headers,
+        actual_type,
     } = args;
     if methods.is_empty() {
         return Err(Error::new_spanned(
@@ -374,6 +377,14 @@ fn generate_operation(
             let ep = #transform(ep);
         }
     });
+    let update_content_type = match &actual_type {
+        Some(actual_type) => quote!(
+            resp.headers_mut().insert(#crate_name::__private::poem::http::header::CONTENT_TYPE,
+                #crate_name::__private::poem::http::HeaderValue::from_static(<#actual_type as #crate_name::payload::Payload>::CONTENT_TYPE)
+            );
+        ),
+        None => quote!(),
+    };
 
     for method in &methods {
         let http_method = method.to_http_method();
@@ -387,7 +398,13 @@ fn generate_operation(
                         #(#parse_args)*
                         let res = api_obj.#fn_ident(#(#use_args),*).await;
                         let res = #crate_name::__private::poem::error::IntoResult::into_result(res);
-                        ::std::result::Result::map(res, #crate_name::__private::poem::IntoResponse::into_response)
+                        match ::std::result::Result::map(res, #crate_name::__private::poem::IntoResponse::into_response) {
+                            ::std::result::Result::Ok(mut resp) => {
+                                #update_content_type
+                                ::std::result::Result::Ok(resp)
+                            }
+                            ::std::result::Result::Err(err) => ::std::result::Result::Err(err),
+                        }
                     }
                 });
                 #transform
@@ -465,6 +482,11 @@ fn generate_operation(
         });
     }
 
+    let resp_meta = match &actual_type {
+        Some(actual_type) => quote!(<#actual_type as #crate_name::ApiResponse>::meta()),
+        None => quote!(<#res_ty as #crate_name::ApiResponse>::meta()),
+    };
+
     for method in &methods {
         let http_method = method.to_http_method();
         ctx.operations
@@ -489,7 +511,7 @@ fn generate_operation(
                         request
                     },
                     responses: {
-                        let mut meta = <#res_ty as #crate_name::ApiResponse>::meta();
+                        let mut meta = #resp_meta;
                         #(#update_extra_response_headers)*
                         meta
                     },

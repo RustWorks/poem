@@ -28,11 +28,11 @@ pub struct MetaDiscriminatorObject {
         skip_serializing_if = "Vec::is_empty",
         serialize_with = "serialize_mapping"
     )]
-    pub mapping: Vec<(&'static str, String)>,
+    pub mapping: Vec<(String, String)>,
 }
 
 fn serialize_mapping<S: Serializer>(
-    mapping: &[(&'static str, String)],
+    mapping: &[(String, String)],
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     let mut s = serializer.serialize_map(None)?;
@@ -484,6 +484,16 @@ pub struct MetaPath {
 }
 
 #[derive(Debug, Default, PartialEq, Serialize)]
+pub struct MetaContact {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Default, PartialEq, Serialize)]
 pub struct MetaLicense {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -503,6 +513,8 @@ pub struct MetaInfo {
     pub version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terms_of_service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contact: Option<MetaContact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<MetaLicense>,
 }

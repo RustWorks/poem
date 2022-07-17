@@ -40,7 +40,7 @@
 //!
 //! main.rs
 //!
-//! ```no_run
+//! ```ignore
 //! use poem::{listener::TcpListener, Route, Server};
 //! use poem_openapi::{payload::PlainText, OpenApi, OpenApiService};
 //!
@@ -94,6 +94,7 @@
 //! | Feature    | Description |
 //! |------------|-----------------------------------------------------------------------|
 //! | chrono     | Integrate with the [`chrono` crate](https://crates.io/crates/chrono) |
+//! | time  | Integrate with the [`time` crate](https://crates.io/crates/time). |
 //! | humantime  | Integrate with the [`humantime` crate](https://crates.io/crates/humantime) |
 //! | swagger-ui | Add swagger UI support |
 //! | rapidoc    | Add RapiDoc UI support |
@@ -113,8 +114,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
+/// Macros to help with building custom payload types.
 #[macro_use]
-mod macros;
+pub mod macros;
 
 pub mod auth;
 pub mod error;
@@ -136,7 +138,9 @@ pub use base::{
     ApiExtractor, ApiExtractorType, ApiResponse, ExtractParamOptions, OAuthScopes, OpenApi,
     ResponseContent, Tags, Webhook,
 };
-pub use openapi::{ExternalDocumentObject, LicenseObject, OpenApiService, ServerObject};
+pub use openapi::{
+    ContactObject, ExternalDocumentObject, LicenseObject, OpenApiService, ServerObject,
+};
 #[doc = include_str!("docs/request.md")]
 pub use poem_openapi_derive::ApiRequest;
 #[doc = include_str!("docs/response.md")]

@@ -1,6 +1,6 @@
 [package]
 name = "poem-openapi-derive"
-version = "2.0.2"
+version = "2.0.5"
 authors = ["sunli <scott_s829@163.com>"]
 edition = "2021"
 description = "Macros for poem-openapi"
@@ -15,7 +15,7 @@ categories = ["network-programming", "asynchronous"]
 proc-macro = true
 
 [dependencies]
-darling = "0.13.0"
+darling = "0.14.1"
 proc-macro-crate = "1.1.0"
 proc-macro2 = "1.0.29"
 quote = "1.0.9"

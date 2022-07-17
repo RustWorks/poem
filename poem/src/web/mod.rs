@@ -1,5 +1,6 @@
 //! Commonly used as the type of extractor or response.
 
+mod accept;
 mod addr;
 #[cfg(feature = "compression")]
 mod compress;
@@ -52,6 +53,7 @@ pub use self::tempfile::TempFile;
 #[cfg(feature = "xml")]
 pub use self::xml::Xml;
 pub use self::{
+    accept::Accept,
     addr::{LocalAddr, RemoteAddr},
     data::Data,
     form::Form,
@@ -249,6 +251,10 @@ impl RequestBody {
 ///
 ///     Ready to accept a static file request
 /// [`StaticFileRequest`](static_file::StaticFileRequest).
+///
+/// - **Accept**
+///
+///     Extracts the `Accept` header from the incoming request.
 ///
 /// # Create your own extractor
 ///
