@@ -5,10 +5,10 @@ use darling::{
 };
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::{Attribute, DeriveInput, Error, Generics, Type};
+use syn::{ext::IdentExt, Attribute, DeriveInput, Error, Generics, Type};
 
 use crate::{
-    common_args::ExternalDocument,
+    common_args::{apply_rename_rule_variant, ExternalDocument, RenameRule},
     error::GeneratorResult,
     utils::{create_object_name, get_crate_name, get_description, optional_literal},
 };
@@ -41,6 +41,8 @@ struct UnionArgs {
     discriminator_name: Option<String>,
     #[darling(default)]
     external_docs: Option<ExternalDocument>,
+    #[darling(default)]
+    rename_all: Option<RenameRule>,
 }
 
 pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
@@ -78,12 +80,15 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
             1 => {
                 let object_ty = &variant.fields.fields[0];
                 let schema_name = quote! {
-                    ::std::format!("{}[{}]", <Self as #crate_name::types::Type>::name(), <#object_ty as #crate_name::types::Type>::name())
+                    ::std::format!("{}_{}", <Self as #crate_name::types::Type>::name(), <#object_ty as #crate_name::types::Type>::name())
                 };
                 let mapping_name = match &variant.mapping {
                     Some(mapping) => quote!(::std::string::ToString::to_string(#mapping)),
                     None => {
-                        let name = item_ident.to_string();
+                        let name = apply_rename_rule_variant(
+                            args.rename_all,
+                            item_ident.unraw().to_string(),
+                        );
                         quote!(::std::string::ToString::to_string(#name))
                     }
                 };

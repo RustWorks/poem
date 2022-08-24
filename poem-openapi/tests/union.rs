@@ -49,19 +49,19 @@ fn with_discriminator() {
             discriminator: Some(MetaDiscriminatorObject {
                 property_name: "type",
                 mapping: vec![
-                    ("A".to_string(), "#/components/schemas/MyObj[A]".to_string()),
-                    ("B".to_string(), "#/components/schemas/MyObj[B]".to_string()),
+                    ("A".to_string(), "#/components/schemas/MyObj_A".to_string()),
+                    ("B".to_string(), "#/components/schemas/MyObj_B".to_string()),
                 ]
             }),
             any_of: vec![
-                MetaSchemaRef::Reference("MyObj[A]".to_string()),
-                MetaSchemaRef::Reference("MyObj[B]".to_string()),
+                MetaSchemaRef::Reference("MyObj_A".to_string()),
+                MetaSchemaRef::Reference("MyObj_B".to_string()),
             ],
             ..MetaSchema::ANY
         }
     );
 
-    let schema_myobj_a = get_meta_by_name::<MyObj>("MyObj[A]");
+    let schema_myobj_a = get_meta_by_name::<MyObj>("MyObj_A");
     assert_eq!(
         schema_myobj_a,
         MetaSchema {
@@ -83,7 +83,7 @@ fn with_discriminator() {
         }
     );
 
-    let schema_myobj_b = get_meta_by_name::<MyObj>("MyObj[B]");
+    let schema_myobj_b = get_meta_by_name::<MyObj>("MyObj_B");
     assert_eq!(
         schema_myobj_b,
         MetaSchema {
@@ -181,19 +181,19 @@ fn with_discriminator_mapping() {
             discriminator: Some(MetaDiscriminatorObject {
                 property_name: "type",
                 mapping: vec![
-                    ("c".to_string(), "#/components/schemas/MyObj[A]".to_string()),
-                    ("d".to_string(), "#/components/schemas/MyObj[B]".to_string()),
+                    ("c".to_string(), "#/components/schemas/MyObj_A".to_string()),
+                    ("d".to_string(), "#/components/schemas/MyObj_B".to_string()),
                 ]
             }),
             any_of: vec![
-                MetaSchemaRef::Reference("MyObj[A]".to_string()),
-                MetaSchemaRef::Reference("MyObj[B]".to_string()),
+                MetaSchemaRef::Reference("MyObj_A".to_string()),
+                MetaSchemaRef::Reference("MyObj_B".to_string()),
             ],
             ..MetaSchema::ANY
         }
     );
 
-    let schema_myobj_a = get_meta_by_name::<MyObj>("MyObj[A]");
+    let schema_myobj_a = get_meta_by_name::<MyObj>("MyObj_A");
     assert_eq!(
         schema_myobj_a,
         MetaSchema {
@@ -215,7 +215,7 @@ fn with_discriminator_mapping() {
         }
     );
 
-    let schema_myobj_b = get_meta_by_name::<MyObj>("MyObj[B]");
+    let schema_myobj_b = get_meta_by_name::<MyObj>("MyObj_B");
     assert_eq!(
         schema_myobj_b,
         MetaSchema {
@@ -518,4 +518,91 @@ async fn generics() {
 
     assert_eq!(schema_f32_f64.any_of[0], f32::schema_ref());
     assert_eq!(schema_f32_f64.any_of[1], f64::schema_ref());
+}
+
+#[test]
+fn rename_all() {
+    #[derive(Object, Debug, PartialEq)]
+    struct A {
+        value: i32,
+    }
+
+    #[derive(Object, Debug, PartialEq)]
+    struct B {
+        value: String,
+    }
+
+    #[derive(Union, Debug, PartialEq)]
+    #[oai(discriminator_name = "type", rename_all = "camelCase")]
+    enum MyObj {
+        PutInt(A),
+        PutString(B),
+    }
+
+    let schema = get_meta::<MyObj>();
+
+    assert_eq!(
+        schema,
+        MetaSchema {
+            rust_typename: Some("union::rename_all::MyObj"),
+            ty: "object",
+            discriminator: Some(MetaDiscriminatorObject {
+                property_name: "type",
+                mapping: vec![
+                    (
+                        "putInt".to_string(),
+                        "#/components/schemas/MyObj_A".to_string()
+                    ),
+                    (
+                        "putString".to_string(),
+                        "#/components/schemas/MyObj_B".to_string()
+                    ),
+                ]
+            }),
+            any_of: vec![
+                MetaSchemaRef::Reference("MyObj_A".to_string()),
+                MetaSchemaRef::Reference("MyObj_B".to_string()),
+            ],
+            ..MetaSchema::ANY
+        }
+    );
+
+    assert_eq!(
+        MyObj::parse_from_json(Some(json!({
+            "type": "putInt",
+            "value": 100,
+        })))
+        .unwrap(),
+        MyObj::PutInt(A { value: 100 })
+    );
+
+    assert_eq!(
+        MyObj::PutInt(A { value: 100 }).to_json(),
+        Some(json!({
+            "type": "putInt",
+            "value": 100,
+        }))
+    );
+
+    assert_eq!(
+        MyObj::parse_from_json(Some(json!({
+            "type": "putString",
+            "value": "abc",
+        })))
+        .unwrap(),
+        MyObj::PutString(B {
+            value: "abc".to_string()
+        })
+    );
+
+    assert_eq!(
+        MyObj::PutString(B {
+            value: "abc".to_string()
+        })
+        .to_json(),
+        Some(json!({
+            "type": "putString",
+            "value": "abc",
+        }))
+    );
 }

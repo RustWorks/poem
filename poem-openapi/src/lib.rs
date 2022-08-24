@@ -136,10 +136,10 @@ mod ui;
 
 pub use base::{
     ApiExtractor, ApiExtractorType, ApiResponse, ExtractParamOptions, OAuthScopes, OpenApi,
-    ResponseContent, Tags, Webhook,
+    OperationId, ResponseContent, Tags, Webhook,
 };
 pub use openapi::{
-    ContactObject, ExternalDocumentObject, LicenseObject, OpenApiService, ServerObject,
+    ContactObject, ExternalDocumentObject, ExtraHeader, LicenseObject, OpenApiService, ServerObject,
 };
 #[doc = include_str!("docs/request.md")]
 pub use poem_openapi_derive::ApiRequest;
@@ -149,6 +149,7 @@ pub use poem_openapi_derive::ApiResponse;
 pub use poem_openapi_derive::Enum;
 #[doc = include_str!("docs/multipart.md")]
 pub use poem_openapi_derive::Multipart;
+#[doc = include_str!("docs/newtype.md")]
 pub use poem_openapi_derive::NewType;
 #[doc = include_str!("docs/oauth_scopes.md")]
 pub use poem_openapi_derive::OAuthScopes;
