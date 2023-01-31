@@ -25,6 +25,8 @@ mod static_file;
 mod tempfile;
 #[cfg(feature = "xml")]
 mod xml;
+#[cfg(feature = "yaml")]
+mod yaml;
 #[doc(inline)]
 pub use headers;
 #[cfg(feature = "csrf")]
@@ -36,6 +38,8 @@ pub mod websocket;
 
 use std::{convert::Infallible, fmt::Debug};
 
+#[cfg(feature = "compression")]
+pub use async_compression::Level as CompressionLevel;
 use bytes::Bytes;
 use http::header;
 
@@ -52,6 +56,8 @@ pub use self::static_file::{StaticFileRequest, StaticFileResponse};
 pub use self::tempfile::TempFile;
 #[cfg(feature = "xml")]
 pub use self::xml::Xml;
+#[cfg(feature = "yaml")]
+pub use self::yaml::Yaml;
 pub use self::{
     accept::Accept,
     addr::{LocalAddr, RemoteAddr},
@@ -255,6 +261,10 @@ impl RequestBody {
 /// - **Accept**
 ///
 ///     Extracts the `Accept` header from the incoming request.
+///
+/// - **PathPattern**
+///
+///     Extracts the matched path pattern from the incoming request.
 ///
 /// # Create your own extractor
 ///

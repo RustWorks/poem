@@ -9,7 +9,7 @@ on:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -46,6 +46,8 @@ jobs:
           override: true
       - name: Checkout
         uses: actions/checkout@v2
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
       - name: get version
         working-directory: ${{ matrix.package.path }}
         run: echo PACKAGE_VERSION=$(sed -nE 's/^\s*version = "(.*?)"/\1/p' Cargo.toml) >> $GITHUB_ENV

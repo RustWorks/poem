@@ -5,7 +5,7 @@ use darling::{
 };
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::{Attribute, DeriveInput, Error, Type};
+use syn::{Attribute, DeriveInput, Error, Generics, Type};
 
 use crate::{
     common_args::ExternalDocument,
@@ -19,6 +19,7 @@ use crate::{
 #[darling(attributes(oai), forward_attrs(doc))]
 struct NewTypeArgs {
     ident: Ident,
+    generics: Generics,
     data: Data<Ignored, Type>,
     attrs: Vec<Attribute>,
 
@@ -36,6 +37,8 @@ struct NewTypeArgs {
     to_header: bool,
     #[darling(default)]
     external_docs: Option<ExternalDocument>,
+    #[darling(default)]
+    example: bool,
 }
 
 const fn default_true() -> bool {
@@ -45,6 +48,7 @@ const fn default_true() -> bool {
 pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
     let args: NewTypeArgs = NewTypeArgs::from_derive_input(&args)?;
     let crate_name = get_crate_name(args.internal);
+    let (impl_generics, ty_generics, where_clause) = args.generics.split_for_impl();
     let ident = &args.ident;
     let (summary, description) = get_summary_and_description(&args.attrs)?;
     let summary = optional_literal_string(&summary);
@@ -75,19 +79,30 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
         }
         None => quote!(::std::option::Option::None),
     };
+    let example = if args.example {
+        quote! {
+            {
+                let value = <Self as #crate_name::types::Example>::example();
+                <Self as #crate_name::types::ToJSON>::to_json(&value)
+            }
+        }
+    } else {
+        quote!(None)
+    };
 
     let schema_ref = quote! {
         <#inner_ty as #crate_name::types::Type>::schema_ref().merge(#crate_name::registry::MetaSchema {
             title: #summary,
             description: #description,
             external_docs: #external_docs,
+            example: #example,
             ..#crate_name::registry::MetaSchema::ANY
         })
     };
 
     let from_json = if args.from_json {
         Some(quote! {
-            impl #crate_name::types::ParseFromJSON for #ident {
+            impl #impl_generics #crate_name::types::ParseFromJSON for #ident #ty_generics #where_clause {
                 fn parse_from_json(value: ::std::option::Option<#crate_name::__private::serde_json::Value>) -> #crate_name::types::ParseResult<Self> {
                     let value = ::std::result::Result::map_err(<#inner_ty as #crate_name::types::ParseFromJSON>::parse_from_json(value), poem_openapi::types::ParseError::propagate)?;
                     ::std::result::Result::Ok(#ident(value))
@@ -100,7 +115,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
 
     let from_parameter = if args.from_parameter {
         Some(quote! {
-            impl #crate_name::types::ParseFromParameter for #ident {
+            impl #impl_generics #crate_name::types::ParseFromParameter for #ident #ty_generics #where_clause {
                 fn parse_from_parameter(value: &str) -> #crate_name::types::ParseResult<Self> {
                     let value = ::std::result::Result::map_err(<#inner_ty as #crate_name::types::ParseFromParameter>::parse_from_parameter(value), poem_openapi::types::ParseError::propagate)?;
                     ::std::result::Result::Ok(#ident(value))
@@ -121,7 +136,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
     let from_multipart = if args.from_multipart {
         Some(quote! {
             #[#crate_name::__private::poem::async_trait]
-            impl #crate_name::types::ParseFromMultipartField for #ident {
+            impl #impl_generics #crate_name::types::ParseFromMultipartField for #ident #ty_generics #where_clause {
                 async fn parse_from_multipart(field: ::std::option::Option<#crate_name::__private::poem::web::Field>) -> #crate_name::types::ParseResult<Self> {
                     let value = ::std::result::Result::map_err(<#inner_ty as #crate_name::types::ParseFromMultipartField>::parse_from_multipart(field).await, poem_openapi::types::ParseError::propagate)?;
                     ::std::result::Result::Ok(#ident(value))
@@ -139,7 +154,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
 
     let to_json = if args.to_json {
         Some(quote! {
-            impl #crate_name::types::ToJSON for #ident {
+            impl #impl_generics #crate_name::types::ToJSON for #ident #ty_generics #where_clause {
                 fn to_json(&self) -> ::std::option::Option<#crate_name::__private::serde_json::Value> {
                     <#inner_ty as #crate_name::types::ToJSON>::to_json(&self.0)
                 }
@@ -151,7 +166,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
 
     let to_header = if args.to_header {
         Some(quote! {
-            impl #crate_name::types::ToHeader for #ident {
+            impl #impl_generics #crate_name::types::ToHeader for #ident #ty_generics #where_clause {
                 fn to_header(&self) -> Option<#crate_name::__private::poem::http::HeaderValue> {
                     <#inner_ty as #crate_name::types::ToHeader>::to_header(&self.0)
                 }
@@ -162,7 +177,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
     };
 
     let expanded = quote! {
-        impl #crate_name::types::Type for #ident {
+        impl #impl_generics #crate_name::types::Type for #ident #ty_generics #where_clause {
             const IS_REQUIRED: bool = <#inner_ty as #crate_name::types::Type>::IS_REQUIRED;
             type RawValueType = <#inner_ty as #crate_name::types::Type>::RawValueType;
             type RawElementValueType = <#inner_ty as #crate_name::types::Type>::RawElementValueType;

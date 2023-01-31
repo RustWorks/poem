@@ -1,5 +1,7 @@
 mod request;
 
+use std::fmt::{self, Display};
+
 use poem::{
     http::{HeaderValue, StatusCode},
     test::TestClient,
@@ -51,7 +53,7 @@ fn meta() {
                     description: "A\nB\n\nC",
                     status: Some(400),
                     content: vec![MetaMediaType {
-                        content_type: "application/json",
+                        content_type: "application/json; charset=utf-8",
                         schema: MetaSchemaRef::Reference("BadRequestResult".to_string())
                     }],
                     headers: vec![]
@@ -60,7 +62,7 @@ fn meta() {
                     description: "",
                     status: None,
                     content: vec![MetaMediaType {
-                        content_type: "text/plain",
+                        content_type: "text/plain; charset=utf-8",
                         schema: MetaSchemaRef::Inline(Box::new(MetaSchema::new("string"))),
                     }],
                     headers: vec![]
@@ -248,7 +250,7 @@ async fn generic() {
                 description: "",
                 status: Some(200),
                 content: vec![MetaMediaType {
-                    content_type: "application/json",
+                    content_type: "application/json; charset=utf-8",
                     schema: MetaSchemaRef::Inline(Box::new(MetaSchema::new("string")))
                 }],
                 headers: vec![]
@@ -448,6 +450,30 @@ async fn as_error() {
     assert_eq!(responses[0].status, Some(200));
     assert_eq!(responses[1].status, Some(201));
     assert_eq!(responses[2].status, Some(502));
+
+    let err: Error = ErrResponse::BadGateway.into();
+    assert_eq!(err.to_string(), "Bad gateway");
+}
+
+#[tokio::test]
+async fn display() {
+    #[derive(Debug, ApiResponse)]
+    #[oai(display)]
+    enum ErrResponse {
+        #[oai(status = 400)]
+        InvalidValue(Json<i32>),
+    }
+
+    impl Display for ErrResponse {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                ErrResponse::InvalidValue(value) => write!(f, "invalid value: {}", value.0),
+            }
+        }
+    }
+
+    let err: Error = ErrResponse::InvalidValue(Json(123)).into();
+    assert_eq!(err.to_string(), "invalid value: 123");
 }
 
 #[tokio::test]
@@ -483,14 +509,14 @@ async fn actual_type() {
     assert_eq!(response.status, Some(200));
 
     let media = &response.content[0];
-    assert_eq!(media.content_type, "application/json");
+    assert_eq!(media.content_type, "application/json; charset=utf-8");
     assert_eq!(media.schema, <Json<MyObj>>::schema_ref());
 
     let ep = OpenApiService::new(Api, "test", "1.0");
     let cli = TestClient::new(ep);
     let resp = cli.get("/").send().await;
 
-    resp.assert_content_type("application/json");
+    resp.assert_content_type("application/json; charset=utf-8");
     resp.assert_json(&serde_json::json!({ "value": 100 })).await;
 
     let mut registry = Registry::new();

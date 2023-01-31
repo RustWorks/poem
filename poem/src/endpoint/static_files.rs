@@ -74,6 +74,7 @@ pub struct StaticFilesEndpoint {
     path: PathBuf,
     show_files_listing: bool,
     index_file: Option<String>,
+    fallback_to_index: bool,
     prefer_utf8: bool,
     redirect_to_slash: bool,
 }
@@ -98,6 +99,7 @@ impl StaticFilesEndpoint {
             path: path.into(),
             show_files_listing: false,
             index_file: None,
+            fallback_to_index: true,
             prefer_utf8: true,
             redirect_to_slash: false,
         }
@@ -148,6 +150,15 @@ impl StaticFilesEndpoint {
             ..self
         }
     }
+
+    /// Fall back to the configured index file if any, if the file is not found
+    #[must_use]
+    pub fn fallback_to_index(self) -> Self {
+        Self {
+            fallback_to_index: true,
+            ..self
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -176,7 +187,7 @@ impl Endpoint for StaticFilesEndpoint {
             } else if p == OsStr::new("..") {
                 file_path.pop();
             } else {
-                file_path.push(&p);
+                file_path.push(p);
             }
         }
 
@@ -185,6 +196,17 @@ impl Endpoint for StaticFilesEndpoint {
         }
 
         if !file_path.exists() {
+            if self.fallback_to_index {
+                if let Some(index_file) = &self.index_file {
+                    let index_path = self.path.join(index_file);
+                    if index_path.is_file() {
+                        return Ok(StaticFileRequest::from_request_without_body(&req)
+                            .await?
+                            .create_response(&index_path, self.prefer_utf8)?
+                            .into_response());
+                    }
+                }
+            }
             return Err(StaticFileError::NotFound.into());
         }
 
@@ -230,8 +252,12 @@ impl Endpoint for StaticFilesEndpoint {
                         if !base_url.ends_with('/') {
                             base_url.push('/');
                         }
+                        let filename_url = percent_encoding::percent_encode(
+                            filename.as_bytes(),
+                            percent_encoding::NON_ALPHANUMERIC,
+                        );
                         template.files.push(FileRef {
-                            url: format!("{}{}", base_url, filename),
+                            url: format!("{base_url}{filename_url}"),
                             filename: filename.to_string(),
                             is_dir: entry.path().is_dir(),
                         });

@@ -61,11 +61,12 @@ impl Debug for ErrorSource {
     }
 }
 
-type BoxAsResponseFn = Box<dyn Fn(&Error) -> Response + Send + Sync + 'static>;
+type AsResponseFn = fn(&Error) -> Response;
+type GetStatusFn = fn(&Error) -> StatusCode;
 
 enum AsResponse {
     Status(StatusCode),
-    Fn(BoxAsResponseFn),
+    Fn(AsResponseFn, GetStatusFn),
     Response(Response),
 }
 
@@ -76,10 +77,16 @@ impl AsResponse {
     }
 
     fn from_type<T: ResponseError + StdError + Send + Sync + 'static>() -> Self {
-        AsResponse::Fn(Box::new(|err| {
-            let err = err.downcast_ref::<T>().expect("valid error");
-            err.as_response()
-        }))
+        AsResponse::Fn(
+            |err| {
+                let err = err.downcast_ref::<T>().expect("valid error");
+                err.as_response()
+            },
+            |err| {
+                let err = err.downcast_ref::<T>().expect("valid error");
+                err.status()
+            },
+        )
     }
 }
 
@@ -183,6 +190,7 @@ pub struct Error {
     as_response: AsResponse,
     source: Option<ErrorSource>,
     extensions: Extensions,
+    msg: Option<String>,
 }
 
 impl Debug for Error {
@@ -195,13 +203,17 @@ impl Debug for Error {
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if let Some(msg) = &self.msg {
+            return write!(f, "{msg}");
+        }
+
         match &self.source {
             Some(ErrorSource::BoxedError(err)) => Display::fmt(err, f),
             #[cfg(feature = "anyhow")]
-            Some(ErrorSource::Anyhow(err)) => Display::fmt(err, f),
+            Some(ErrorSource::Anyhow(err)) => write!(f, "{err:#}"),
             #[cfg(feature = "eyre06")]
             Some(ErrorSource::Eyre06(err)) => Display::fmt(err, f),
-            None => f.write_str("response"),
+            None => write!(f, "{}", self.status()),
         }
     }
 }
@@ -218,6 +230,7 @@ impl<T: ResponseError + StdError + Send + Sync + 'static> From<T> for Error {
             as_response: AsResponse::from_type::<T>(),
             source: Some(ErrorSource::BoxedError(Box::new(err))),
             extensions: Extensions::default(),
+            msg: None,
         }
     }
 }
@@ -234,6 +247,7 @@ impl From<(StatusCode, Box<dyn StdError + Send + Sync>)> for Error {
             as_response: AsResponse::from_status(status),
             source: Some(ErrorSource::BoxedError(err)),
             extensions: Extensions::default(),
+            msg: None,
         }
     }
 }
@@ -245,6 +259,7 @@ impl From<anyhow::Error> for Error {
             as_response: AsResponse::from_status(StatusCode::INTERNAL_SERVER_ERROR),
             source: Some(ErrorSource::Anyhow(err)),
             extensions: Extensions::default(),
+            msg: None,
         }
     }
 }
@@ -256,6 +271,7 @@ impl From<eyre06::Error> for Error {
             as_response: AsResponse::from_status(StatusCode::INTERNAL_SERVER_ERROR),
             source: Some(ErrorSource::Eyre06(err)),
             extensions: Extensions::default(),
+            msg: None,
         }
     }
 }
@@ -267,6 +283,7 @@ impl From<(StatusCode, anyhow::Error)> for Error {
             as_response: AsResponse::from_status(status),
             source: Some(ErrorSource::Anyhow(err)),
             extensions: Extensions::default(),
+            msg: None,
         }
     }
 }
@@ -278,6 +295,7 @@ impl From<(StatusCode, eyre06::Report)> for Error {
             as_response: AsResponse::from_status(status),
             source: Some(ErrorSource::Eyre06(err)),
             extensions: Extensions::default(),
+            msg: None,
         }
     }
 }
@@ -296,6 +314,7 @@ impl Error {
             as_response: AsResponse::from_status(status),
             source: Some(ErrorSource::BoxedError(Box::new(err))),
             extensions: Extensions::default(),
+            msg: None,
         }
     }
 
@@ -305,6 +324,7 @@ impl Error {
             as_response: AsResponse::Response(resp),
             source: None,
             extensions: Extensions::default(),
+            msg: None,
         }
     }
 
@@ -357,6 +377,7 @@ impl Error {
     pub fn downcast<T: StdError + Send + Sync + 'static>(self) -> Result<T, Error> {
         let as_response = self.as_response;
         let extensions = self.extensions;
+        let msg = self.msg;
 
         match self.source {
             Some(ErrorSource::BoxedError(err)) => match err.downcast::<T>() {
@@ -365,6 +386,7 @@ impl Error {
                     as_response,
                     source: Some(ErrorSource::BoxedError(err)),
                     extensions,
+                    msg,
                 }),
             },
             #[cfg(feature = "anyhow")]
@@ -374,6 +396,7 @@ impl Error {
                     as_response,
                     source: Some(ErrorSource::Anyhow(err)),
                     extensions,
+                    msg,
                 }),
             },
             #[cfg(feature = "eyre06")]
@@ -383,12 +406,14 @@ impl Error {
                     as_response,
                     source: Some(ErrorSource::Eyre06(err)),
                     extensions,
+                    msg,
                 }),
             },
             None => Err(Error {
                 as_response,
                 source: None,
                 extensions,
+                msg,
             }),
         }
     }
@@ -410,7 +435,7 @@ impl Error {
     pub fn into_response(self) -> Response {
         let mut resp = match self.as_response {
             AsResponse::Status(status) => Response::builder().status(status).body(self.to_string()),
-            AsResponse::Fn(ref f) => f(&self),
+            AsResponse::Fn(ref f, _) => f(&self),
             AsResponse::Response(resp) => resp,
         };
         *resp.extensions_mut() = self.extensions;
@@ -445,6 +470,26 @@ impl Error {
     /// Get a reference from extensions
     pub fn data<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.extensions.get()
+    }
+
+    /// Get the status code of the error
+    pub fn status(&self) -> StatusCode {
+        match &self.as_response {
+            AsResponse::Status(status) => *status,
+            AsResponse::Fn(_, get_status) => (get_status)(self),
+            AsResponse::Response(resp) => resp.status(),
+        }
+    }
+
+    /// Returns `true` if the error was created from the response
+    #[inline]
+    pub fn is_from_response(&self) -> bool {
+        matches!(&self.as_response, AsResponse::Response(_))
+    }
+
+    /// Set the error message
+    pub fn set_error_message(&mut self, msg: impl Into<String>) {
+        self.msg = Some(msg.into());
     }
 }
 
@@ -693,49 +738,83 @@ impl ResponseError for ParseFormError {
 
 /// A possible error value when parsing JSON.
 #[derive(Debug, thiserror::Error)]
-#[error("parse: {0}")]
-pub struct ParseJsonError(#[from] pub serde_json::Error);
+pub enum ParseJsonError {
+    /// Invalid content type.
+    #[error("invalid content type `{0}`, expect: `application/json`")]
+    InvalidContentType(String),
+
+    /// `Content-Type` header is required.
+    #[error("expect content type `application/json`")]
+    ContentTypeRequired,
+
+    /// Url decode error.
+    #[error("parse error: {0}")]
+    Parse(#[from] serde_json::Error),
+}
 
 impl ResponseError for ParseJsonError {
     fn status(&self) -> StatusCode {
-        StatusCode::BAD_REQUEST
-    }
-}
-
-/// A missing json Content-Type error value when parsing header.
-#[derive(Debug, thiserror::Error)]
-#[error("Missing `Content-Type: application/json`")]
-pub struct MissingJsonContentTypeError;
-
-impl ResponseError for MissingJsonContentTypeError {
-    fn status(&self) -> StatusCode {
-        StatusCode::UNSUPPORTED_MEDIA_TYPE
+        match self {
+            ParseJsonError::InvalidContentType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ParseJsonError::ContentTypeRequired => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ParseJsonError::Parse(_) => StatusCode::BAD_REQUEST,
+        }
     }
 }
 
 /// A possible error value when parsing XML.
 #[cfg(feature = "xml")]
 #[derive(Debug, thiserror::Error)]
-#[error("parse: {0}")]
-pub struct ParseXmlError(#[from] pub quick_xml::de::DeError);
+pub enum ParseXmlError {
+    /// Invalid content type.
+    #[error("invalid content type `{0}`, expect: `application/xml`")]
+    InvalidContentType(String),
+
+    /// `Content-Type` header is required.
+    #[error("expect content type `application/xml`")]
+    ContentTypeRequired,
+
+    /// Url decode error.
+    #[error("parse error: {0}")]
+    Parse(#[from] quick_xml::de::DeError),
+}
 
 #[cfg(feature = "xml")]
 impl ResponseError for ParseXmlError {
     fn status(&self) -> StatusCode {
-        StatusCode::BAD_REQUEST
+        match self {
+            ParseXmlError::InvalidContentType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ParseXmlError::ContentTypeRequired => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ParseXmlError::Parse(_) => StatusCode::BAD_REQUEST,
+        }
     }
 }
 
-/// A missing xml Content-Type error value when parsing header.
-#[cfg(feature = "xml")]
+/// A possible error value when parsing YAML.
+#[cfg(feature = "yaml")]
 #[derive(Debug, thiserror::Error)]
-#[error("Missing `Content-Type: application/xml`")]
-pub struct MissingXmlContentTypeError;
+pub enum ParseYamlError {
+    /// Invalid content type.
+    #[error("invalid content type `{0}`, expect: `application/yaml`")]
+    InvalidContentType(String),
 
-#[cfg(feature = "xml")]
-impl ResponseError for MissingXmlContentTypeError {
+    /// `Content-Type` header is required.
+    #[error("expect content type `application/yaml`")]
+    ContentTypeRequired,
+
+    /// Url decode error.
+    #[error("parse error: {0}")]
+    Parse(#[from] serde_yaml::Error),
+}
+
+#[cfg(feature = "yaml")]
+impl ResponseError for ParseYamlError {
     fn status(&self) -> StatusCode {
-        StatusCode::UNSUPPORTED_MEDIA_TYPE
+        match self {
+            ParseYamlError::InvalidContentType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ParseYamlError::ContentTypeRequired => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ParseYamlError::Parse(_) => StatusCode::BAD_REQUEST,
+        }
     }
 }
 

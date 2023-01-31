@@ -7,6 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use bytes::Bytes;
 use headers::{
     ContentRange, ETag, HeaderMapExt, IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince,
     Range,
@@ -27,6 +28,8 @@ pub enum StaticFileResponse {
     Ok {
         /// Response body
         body: Body,
+        /// Content length
+        content_length: u64,
         /// Content type
         content_type: Option<String>,
         /// `ETag` header value
@@ -40,20 +43,33 @@ pub enum StaticFileResponse {
     NotModified,
 }
 
+impl StaticFileResponse {
+    /// Set the content type
+    pub fn with_content_type(mut self, ct: impl Into<String>) -> Self {
+        if let StaticFileResponse::Ok { content_type, .. } = &mut self {
+            *content_type = Some(ct.into());
+        }
+        self
+    }
+}
+
 impl IntoResponse for StaticFileResponse {
     fn into_response(self) -> Response {
         match self {
             StaticFileResponse::Ok {
                 body,
+                content_length,
                 content_type,
                 etag,
                 last_modified,
                 content_range,
             } => {
-                let mut builder = Response::builder().header(header::ACCEPT_RANGES, "bytes");
+                let mut builder = Response::builder()
+                    .header(header::ACCEPT_RANGES, "bytes")
+                    .header(header::CONTENT_LENGTH, content_length);
 
                 if let Some(content_type) = content_type {
-                    builder = builder.content_type(&content_type);
+                    builder = builder.content_type(content_type);
                 }
                 if let Some(etag) = etag {
                     builder = builder.header(header::ETAG, etag);
@@ -103,6 +119,59 @@ impl StaticFileRequest {
     ///
     /// `prefer_utf8` - Specifies whether text responses should signal a UTF-8
     /// encoding.
+    pub fn create_response_from_data(
+        self,
+        data: impl AsRef<[u8]>,
+    ) -> Result<StaticFileResponse, StaticFileError> {
+        let data = data.as_ref();
+
+        // content length
+        let mut content_length = data.len() as u64;
+        let mut content_range = None;
+
+        let body = if let Some((start, end)) = self.range.and_then(|range| range.iter().next()) {
+            let start = match start {
+                Bound::Included(n) => n,
+                Bound::Excluded(n) => n + 1,
+                Bound::Unbounded => 0,
+            };
+            let end = match end {
+                Bound::Included(n) => n + 1,
+                Bound::Excluded(n) => n,
+                Bound::Unbounded => content_length,
+            };
+            if end < start || end > content_length {
+                return Err(StaticFileError::RangeNotSatisfiable {
+                    size: content_length,
+                });
+            }
+
+            if start != 0 || end != content_length {
+                content_range = Some((start..end, content_length));
+            }
+
+            content_length = end - start;
+            Body::from_bytes(Bytes::copy_from_slice(
+                &data[start as usize..(start + content_length) as usize],
+            ))
+        } else {
+            Body::from_bytes(Bytes::copy_from_slice(data))
+        };
+
+        Ok(StaticFileResponse::Ok {
+            body,
+            content_length,
+            content_type: None,
+            etag: None,
+            last_modified: None,
+            content_range,
+        })
+    }
+
+    /// Create static file response.
+    ///
+    /// `prefer_utf8` - Specifies whether text responses should signal a UTF-8
+    /// encoding.
     pub fn create_response(
         self,
         path: impl AsRef<Path>,
@@ -115,6 +184,9 @@ impl StaticFileRequest {
         let guess = mime_guess::from_path(path);
         let mut file = std::fs::File::open(path)?;
         let metadata = file.metadata()?;
+
+        // content length
+        let mut content_length = metadata.len();
 
         // content type
         let content_type = guess.first().map(|mime| {
@@ -172,7 +244,6 @@ impl StaticFileRequest {
                 Bound::Unbounded => metadata.len(),
             };
             if end < start || end > metadata.len() {
-                // builder.typed_header(ContentRange::unsatisfied_bytes(length))
                 return Err(StaticFileError::RangeNotSatisfiable {
                     size: metadata.len(),
                 });
@@ -182,6 +253,7 @@ impl StaticFileRequest {
                 content_range = Some((start..end, metadata.len()));
             }
 
+            content_length = end - start;
             file.seek(SeekFrom::Start(start))?;
             Body::from_async_read(File::from_std(file).take(end - start))
         } else {
@@ -190,6 +262,7 @@ impl StaticFileRequest {
 
         Ok(StaticFileResponse::Ok {
             body,
+            content_length,
             content_type,
             etag: if !etag_str.is_empty() {
                 Some(etag_str)

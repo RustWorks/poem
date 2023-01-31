@@ -55,6 +55,8 @@ struct APIOperation {
     actual_type: Option<Type>,
     #[darling(default, multiple, rename = "code_sample")]
     code_samples: Vec<CodeSample>,
+    #[darling(default)]
+    hidden: bool,
 }
 
 #[derive(FromMeta, Default)]
@@ -77,7 +79,7 @@ struct APIOperationParam {
 }
 
 struct Context {
-    add_routes: IndexMap<String, IndexMap<APIMethod, TokenStream>>,
+    add_routes: Vec<TokenStream>,
     operations: IndexMap<String, Vec<TokenStream>>,
     register_items: Vec<TokenStream>,
 }
@@ -134,19 +136,6 @@ pub(crate) fn generate(
         paths
     };
 
-    let routes = {
-        let mut routes = Vec::new();
-
-        for (path, add_route) in add_routes {
-            let add_route = add_route.values();
-            routes.push(quote! {
-                at(#path, #crate_name::__private::poem::RouteMethod::new()#(.#add_route)*)
-            });
-        }
-
-        routes
-    };
-
     let expanded = quote! {
         #item_impl
 
@@ -161,9 +150,9 @@ pub(crate) fn generate(
                 #(#register_items)*
             }
 
-            fn add_routes(self, route: #crate_name::__private::poem::Route) -> #crate_name::__private::poem::Route {
+            fn add_routes(self, route_table: &mut ::std::collections::HashMap<::std::string::String, ::std::collections::HashMap<#crate_name::__private::poem::http::Method, #crate_name::__private::poem::endpoint::BoxEndpoint<'static>>>) {
                 let api_obj = ::std::sync::Arc::new(self);
-                route #(.#routes)*
+                #(#add_routes)*
             }
         }
     };
@@ -190,6 +179,7 @@ fn generate_operation(
         request_headers,
         actual_type,
         code_samples,
+        hidden,
     } = args;
     if methods.is_empty() {
         return Err(Error::new_spanned(
@@ -234,7 +224,7 @@ fn generate_operation(
         ReturnType::Default => Box::new(syn::parse2(quote!(())).unwrap()),
         ReturnType::Type(_, ty) => ty.clone(),
     };
-    RemoveLifetime.visit_type_mut(&mut *res_ty);
+    RemoveLifetime.visit_type_mut(&mut res_ty);
 
     let mut parse_args = Vec::new();
     let mut use_args = Vec::new();
@@ -263,7 +253,7 @@ fn generate_operation(
             }
         };
 
-        RemoveLifetime.visit_type_mut(&mut *arg_ty);
+        RemoveLifetime.visit_type_mut(&mut arg_ty);
 
         let pname = format_ident!("p{}", i);
         let param_name = operation_param
@@ -272,10 +262,12 @@ fn generate_operation(
             .unwrap_or_else(|| arg_ident.unraw().to_string());
         use_args.push(pname.clone());
 
-        // register
-        ctx.register_items.push(quote! {
-            <#arg_ty as #crate_name::ApiExtractor>::register(registry);
-        });
+        if !hidden {
+            // register arg type
+            ctx.register_items.push(quote! {
+                <#arg_ty as #crate_name::ApiExtractor>::register(registry);
+            });
+        }
 
         // default value for parameter
         let default_value = match &operation_param.default {
@@ -378,17 +370,19 @@ fn generate_operation(
         });
     }
 
-    if let Some(actual_type) = &actual_type {
-        ctx.register_items
-            .push(quote!(<#actual_type as #crate_name::ApiResponse>::register(registry);));
-    } else {
-        ctx.register_items
-            .push(quote!(<#res_ty as #crate_name::ApiResponse>::register(registry);));
+    if !hidden {
+        if let Some(actual_type) = &actual_type {
+            ctx.register_items
+                .push(quote!(<#actual_type as #crate_name::ApiResponse>::register(registry);));
+        } else {
+            ctx.register_items
+                .push(quote!(<#res_ty as #crate_name::ApiResponse>::register(registry);));
+        }
     }
 
     let transform = transform.map(|transform| {
         quote! {
-            let ep = #transform(ep);
+            let ep = #crate_name::__private::poem::EndpointExt::map_to_response(#transform(ep));
         }
     });
     let update_content_type = match &actual_type {
@@ -415,32 +409,32 @@ fn generate_operation(
             }
         });
 
-        if ctx.add_routes.entry(new_path.clone()).or_default().insert(**method, quote! {
-            method(#crate_name::__private::poem::http::Method::#http_method, {
-                let api_obj = ::std::clone::Clone::clone(&api_obj);
-                let ep = #crate_name::__private::poem::endpoint::make(move |request| {
+        ctx.add_routes.push(quote! {
+            route_table.entry(::std::string::ToString::to_string(#new_path))
+                .or_default()
+                .insert(#crate_name::__private::poem::http::Method::#http_method, {
                     let api_obj = ::std::clone::Clone::clone(&api_obj);
-                    async move {
-                        let (request, mut body) = request.split();
-                        #(#parse_args)*
-                        let res = api_obj.#fn_ident(#(#use_args),*).await;
-                        let res = #crate_name::__private::poem::error::IntoResult::into_result(res);
-                        match ::std::result::Result::map(res, #crate_name::__private::poem::IntoResponse::into_response) {
-                            ::std::result::Result::Ok(mut resp) => {
-                                #update_content_type
-                                ::std::result::Result::Ok(resp)
+                    let ep = #crate_name::__private::poem::endpoint::make(move |request| {
+                        let api_obj = ::std::clone::Clone::clone(&api_obj);
+                        async move {
+                            let (request, mut body) = request.split();
+                            #(#parse_args)*
+                            let res = api_obj.#fn_ident(#(#use_args),*).await;
+                            let res = #crate_name::__private::poem::error::IntoResult::into_result(res);
+                            match ::std::result::Result::map(res, #crate_name::__private::poem::IntoResponse::into_response) {
+                                ::std::result::Result::Ok(mut resp) => {
+                                    #update_content_type
+                                    ::std::result::Result::Ok(resp)
+                                }
+                                ::std::result::Result::Err(err) => ::std::result::Result::Err(err),
                             }
-                            ::std::result::Result::Err(err) => ::std::result::Result::Err(err),
                         }
-                    }
+                    });
+                    #transform
+                    #set_operation_id
+                    #crate_name::__private::poem::EndpointExt::boxed(ep)
                 });
-                #transform
-                #set_operation_id
-                ep
-            })
-        }).is_some() {
-            return Err(Error::new(method.span(), "duplicate method").into());
-        }
+        });
     }
 
     let mut tag_names = Vec::new();
@@ -535,44 +529,46 @@ fn generate_operation(
         })
         .collect::<Vec<_>>();
 
-    for method in &methods {
-        let http_method = method.to_http_method();
-        ctx.operations
-            .entry(oai_path.clone())
-            .or_default()
-            .push(quote! {
-                #crate_name::registry::MetaOperation {
-                    tags: ::std::vec![#(#tag_names),*],
-                    method: #crate_name::__private::poem::http::Method::#http_method,
-                    summary: #summary,
-                    description: #description,
-                    external_docs: #external_docs,
-                    params: {
-                        let mut params = ::std::vec::Vec::new();
-                        #(#update_extra_request_headers)*
-                        #(#params_meta)*
-                        params
-                    },
-                    request: {
-                        let mut request = ::std::option::Option::None;
-                        #(#request_meta)*
-                        request
-                    },
-                    responses: {
-                        let mut meta = #resp_meta;
-                        #(#update_extra_response_headers)*
-                        meta
-                    },
-                    deprecated: #deprecated,
-                    security: {
-                        let mut security = ::std::vec![];
-                        #(#security)*
-                        security
-                    },
-                    operation_id: #operation_id,
-                    code_samples: ::std::vec![#(#code_samples),*],
-                }
-            });
+    if !hidden {
+        for method in &methods {
+            let http_method = method.to_http_method();
+            ctx.operations
+                .entry(oai_path.clone())
+                .or_default()
+                .push(quote! {
+                    #crate_name::registry::MetaOperation {
+                        tags: ::std::vec![#(#tag_names),*],
+                        method: #crate_name::__private::poem::http::Method::#http_method,
+                        summary: #summary,
+                        description: #description,
+                        external_docs: #external_docs,
+                        params: {
+                            let mut params = ::std::vec::Vec::new();
+                            #(#update_extra_request_headers)*
+                            #(#params_meta)*
+                            params
+                        },
+                        request: {
+                            let mut request = ::std::option::Option::None;
+                            #(#request_meta)*
+                            request
+                        },
+                        responses: {
+                            let mut meta = #resp_meta;
+                            #(#update_extra_response_headers)*
+                            meta
+                        },
+                        deprecated: #deprecated,
+                        security: {
+                            let mut security = ::std::vec![];
+                            #(#security)*
+                            security
+                        },
+                        operation_id: #operation_id,
+                        code_samples: ::std::vec![#(#code_samples),*],
+                    }
+                });
+        }
     }
 
     Ok(())

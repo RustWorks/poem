@@ -2,7 +2,7 @@ use poem::{
     http::{Method, StatusCode},
     test::TestClient,
     web::Data,
-    EndpointExt, Error,
+    Endpoint, EndpointExt, Error,
 };
 use poem_openapi::{
     param::Query,
@@ -141,10 +141,16 @@ async fn request() {
     assert!(meta_request.required);
     assert_eq!(meta_request.description, Some("Test request"));
 
-    assert_eq!(meta_request.content[0].content_type, "application/json");
+    assert_eq!(
+        meta_request.content[0].content_type,
+        "application/json; charset=utf-8"
+    );
     assert_eq!(meta_request.content[0].schema, i32::schema_ref());
 
-    assert_eq!(meta_request.content[1].content_type, "text/plain");
+    assert_eq!(
+        meta_request.content[1].content_type,
+        "text/plain; charset=utf-8"
+    );
     assert_eq!(meta_request.content[1].schema, String::schema_ref());
 
     assert_eq!(
@@ -164,6 +170,13 @@ async fn request() {
 
     cli.get("/")
         .content_type("application/json")
+        .body("100")
+        .send()
+        .await
+        .assert_status_is_ok();
+
+    cli.get("/")
+        .content_type("application/json; x=10")
         .body("100")
         .send()
         .await
@@ -200,7 +213,10 @@ async fn payload_request() {
     let meta_request = meta.paths[0].operations[0].request.as_ref().unwrap();
     assert!(meta_request.required);
 
-    assert_eq!(meta_request.content[0].content_type, "application/json");
+    assert_eq!(
+        meta_request.content[0].content_type,
+        "application/json; charset=utf-8"
+    );
     assert_eq!(meta_request.content[0].schema, i32::schema_ref());
 
     let ep = OpenApiService::new(Api, "test", "1.0");
@@ -262,7 +278,7 @@ async fn response() {
     assert_eq!(meta_responses.responses[1].status, Some(409));
     assert_eq!(
         meta_responses.responses[1].content[0].content_type,
-        "application/json"
+        "application/json; charset=utf-8"
     );
     assert_eq!(
         meta_responses.responses[1].content[0].schema,
@@ -273,7 +289,7 @@ async fn response() {
     assert_eq!(meta_responses.responses[2].status, None);
     assert_eq!(
         meta_responses.responses[2].content[0].content_type,
-        "text/plain"
+        "text/plain; charset=utf-8"
     );
     assert_eq!(
         meta_responses.responses[2].content[0].schema,
@@ -312,7 +328,7 @@ async fn bad_request_handler() {
     }
 
     fn bad_request_handler(err: Error) -> MyResponse {
-        MyResponse::BadRequest(PlainText(format!("!!! {}", err)))
+        MyResponse::BadRequest(PlainText(format!("!!! {err}")))
     }
 
     struct Api;
@@ -356,7 +372,7 @@ async fn bad_request_handler_for_validator() {
     }
 
     fn bad_request_handler(err: Error) -> MyResponse {
-        MyResponse::BadRequest(PlainText(format!("!!! {}", err)))
+        MyResponse::BadRequest(PlainText(format!("!!! {err}")))
     }
 
     struct Api;
@@ -697,14 +713,14 @@ async fn actual_type() {
     assert_eq!(response.status, Some(200));
 
     let media = &response.content[0];
-    assert_eq!(media.content_type, "application/json");
+    assert_eq!(media.content_type, "application/json; charset=utf-8");
     assert_eq!(media.schema, <Json<MyObj>>::schema_ref());
 
     let ep = OpenApiService::new(Api, "test", "1.0");
     let cli = TestClient::new(ep);
     let resp = cli.get("/").send().await;
 
-    resp.assert_content_type("application/json");
+    resp.assert_content_type("application/json; charset=utf-8");
     resp.assert_json(&serde_json::json!({ "value": 100 })).await;
 
     let mut registry = Registry::new();
@@ -762,4 +778,89 @@ async fn code_samples() {
     assert_eq!(code_sample.lang, "go");
     assert_eq!(code_sample.label, Some("Go"));
     assert_eq!(code_sample.source, "Google Go");
+}
+
+#[tokio::test]
+async fn hidden() {
+    #[derive(Debug, Object)]
+    struct MyObj1 {
+        value: i32,
+    }
+
+    #[derive(Debug, Object)]
+    struct MyObj2 {
+        value: i32,
+    }
+
+    struct Api;
+
+    #[OpenApi]
+    impl Api {
+        #[oai(path = "/api1", method = "get", hidden)]
+        async fn api1(&self, req: Json<MyObj1>) -> Json<i32> {
+            Json(req.0.value)
+        }
+
+        #[oai(path = "/api2", method = "get")]
+        async fn api2(&self, req: Json<MyObj2>) -> Json<i32> {
+            Json(req.0.value)
+        }
+    }
+
+    let meta: MetaApi = Api::meta().remove(0);
+    assert_eq!(meta.paths.len(), 1);
+    let path = &meta.paths[0];
+    assert_eq!(path.path, "/api2");
+
+    let mut registry = Registry::new();
+    Api::register(&mut registry);
+
+    assert!(!registry.schemas.contains_key("MyObj1"));
+    assert!(registry.schemas.contains_key("MyObj2"));
+}
+
+#[test]
+fn issue_405() {
+    struct Api;
+
+    #[OpenApi]
+    impl Api {
+        #[oai(
+            path = "/hello",
+            method = "get",
+            operation_id = "hello",
+            transform = "my_transformer"
+        )]
+        async fn index(&self) -> PlainText<String> {
+            PlainText("hello, world!".to_string())
+        }
+    }
+
+    fn my_transformer(ep: impl Endpoint) -> impl Endpoint {
+        ep.map_to_response()
+    }
+}
+
+#[tokio::test]
+async fn issue_489() {
+    struct Api;
+
+    #[OpenApi]
+    impl Api {
+        #[oai(path = "/hello", method = "get")]
+        async fn get_hello(&self) {}
+
+        #[oai(path = "/hello", method = "delete")]
+        async fn delete_hello(&self) {}
+
+        #[oai(path = "/goodbye", method = "get")]
+        async fn get_goodbye(&self) {}
+    }
+
+    let ep = OpenApiService::new(Api, "test", "1.0");
+    let cli = TestClient::new(ep);
+    cli.delete("/goodbye")
+        .send()
+        .await
+        .assert_status(StatusCode::METHOD_NOT_ALLOWED);
 }

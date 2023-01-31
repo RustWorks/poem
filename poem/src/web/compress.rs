@@ -8,19 +8,18 @@ use tokio::io::{AsyncRead, BufReader};
 
 use crate::{
     http::{header, HeaderValue},
+    web::CompressionLevel,
     Body, IntoResponse, Response,
 };
 
 /// The compression algorithms.
 #[cfg_attr(docsrs, doc(cfg(feature = "compression")))]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum CompressionAlgo {
     /// brotli
     BR,
-
     /// deflate
     DEFLATE,
-
     /// gzip
     GZIP,
 }
@@ -39,6 +38,7 @@ impl FromStr for CompressionAlgo {
 }
 
 impl CompressionAlgo {
+    #[inline]
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             CompressionAlgo::BR => "br",
@@ -50,17 +50,27 @@ impl CompressionAlgo {
     pub(crate) fn compress<'a>(
         &self,
         reader: impl AsyncRead + Send + Unpin + 'a,
+        level: Option<CompressionLevel>,
     ) -> Pin<Box<dyn AsyncRead + Send + 'a>> {
         match self {
-            CompressionAlgo::BR => Box::pin(async_compression::tokio::bufread::BrotliEncoder::new(
-                BufReader::new(reader),
-            )),
-            CompressionAlgo::DEFLATE => Box::pin(
-                async_compression::tokio::bufread::DeflateEncoder::new(BufReader::new(reader)),
+            CompressionAlgo::BR => Box::pin(
+                async_compression::tokio::bufread::BrotliEncoder::with_quality(
+                    BufReader::new(reader),
+                    level.unwrap_or(CompressionLevel::Fastest),
+                ),
             ),
-            CompressionAlgo::GZIP => Box::pin(async_compression::tokio::bufread::GzipEncoder::new(
-                BufReader::new(reader),
-            )),
+            CompressionAlgo::DEFLATE => Box::pin(
+                async_compression::tokio::bufread::DeflateEncoder::with_quality(
+                    BufReader::new(reader),
+                    level.unwrap_or(CompressionLevel::Default),
+                ),
+            ),
+            CompressionAlgo::GZIP => Box::pin(
+                async_compression::tokio::bufread::GzipEncoder::with_quality(
+                    BufReader::new(reader),
+                    level.unwrap_or(CompressionLevel::Default),
+                ),
+            ),
         }
     }
 
@@ -108,12 +118,27 @@ impl Display for CompressionAlgo {
 pub struct Compress<T> {
     inner: T,
     algo: CompressionAlgo,
+    level: Option<CompressionLevel>,
 }
 
 impl<T> Compress<T> {
-    /// /// Create a compressed response using the specified algorithm.
+    /// Create a compressed response using the specified algorithm.
     pub fn new(inner: T, algo: CompressionAlgo) -> Self {
-        Self { inner, algo }
+        Self {
+            inner,
+            algo,
+            level: None,
+        }
+    }
+
+    /// Specify the compression level
+    #[must_use]
+    #[inline]
+    pub fn with_quality(self, level: CompressionLevel) -> Self {
+        Self {
+            level: Some(level),
+            ..self
+        }
     }
 }
 
@@ -126,9 +151,10 @@ impl<T: IntoResponse> IntoResponse for Compress<T> {
             header::CONTENT_ENCODING,
             HeaderValue::from_static(self.algo.as_str()),
         );
+        resp.headers_mut().remove(header::CONTENT_LENGTH);
 
         resp.set_body(Body::from_async_read(
-            self.algo.compress(body.into_async_read()),
+            self.algo.compress(body.into_async_read(), self.level),
         ));
         resp
     }
@@ -165,6 +191,7 @@ mod tests {
         .await;
         resp.assert_status_is_ok();
         resp.assert_header(header::CONTENT_ENCODING, algo.as_str());
+        resp.assert_header_is_not_exist(header::CONTENT_LENGTH);
         assert_eq!(
             decompress_data(algo, &resp.0.into_body().into_bytes().await.unwrap()).await,
             DATA

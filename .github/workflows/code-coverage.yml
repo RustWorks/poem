@@ -7,7 +7,7 @@ on:
 
 jobs:
   cover:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     services:
       redis:
         image: redis:5.0.7
@@ -16,10 +16,12 @@ jobs:
         options: --entrypoint redis-server
     steps:
       - uses: actions/checkout@v1
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.61.0
+          toolchain: 1.62.0
           override: true
           components: rustfmt
       - name: Cache Rust
@@ -27,7 +29,7 @@ jobs:
       - name: Run cargo-tarpaulin
         uses: actions-rs/tarpaulin@v0.1
         with:
-          version: '0.18.0'
+          version: "0.18.0"
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v1.0.2
         with:

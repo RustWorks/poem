@@ -2,18 +2,19 @@ use std::time::Instant;
 
 use libopentelemetry::{
     global,
-    metrics::{Counter, Unit, ValueRecorder},
+    metrics::{Counter, Histogram, Unit},
+    Context, Key,
 };
 use opentelemetry_semantic_conventions::trace;
 
-use crate::{Endpoint, IntoResponse, Middleware, Request, Response, Result};
+use crate::{route::PathPattern, Endpoint, IntoResponse, Middleware, Request, Response, Result};
 
 /// Middleware for metrics with OpenTelemetry.
 #[cfg_attr(docsrs, doc(cfg(feature = "opentelemetry")))]
 pub struct OpenTelemetryMetrics {
     request_count: Counter<u64>,
     error_count: Counter<u64>,
-    duration: ValueRecorder<f64>,
+    duration: Histogram<f64>,
 }
 
 impl Default for OpenTelemetryMetrics {
@@ -36,7 +37,7 @@ impl OpenTelemetryMetrics {
                 .with_description("failed request count (since start of service)")
                 .init(),
             duration: meter
-                .f64_value_recorder("poem_request_duration_ms")
+                .f64_histogram("poem_request_duration_ms")
                 .with_unit(Unit::new("milliseconds"))
                 .with_description(
                     "request duration histogram (in milliseconds, since start of service)",
@@ -64,7 +65,7 @@ impl<E: Endpoint> Middleware<E> for OpenTelemetryMetrics {
 pub struct OpenTelemetryMetricsEndpoint<E> {
     request_count: Counter<u64>,
     error_count: Counter<u64>,
-    duration: ValueRecorder<f64>,
+    duration: Histogram<f64>,
     inner: E,
 }
 
@@ -73,9 +74,11 @@ impl<E: Endpoint> Endpoint for OpenTelemetryMetricsEndpoint<E> {
     type Output = Response;
 
     async fn call(&self, req: Request) -> Result<Self::Output> {
+        let cx = Context::new();
+
         let mut labels = Vec::with_capacity(3);
         labels.push(trace::HTTP_METHOD.string(req.method().to_string()));
-        labels.push(trace::HTTP_TARGET.string(req.uri().path().to_string()));
+        labels.push(trace::HTTP_URL.string(req.original_uri().to_string()));
 
         let s = Instant::now();
         let res = self.inner.call(req).await.map(IntoResponse::into_response);
@@ -83,17 +86,28 @@ impl<E: Endpoint> Endpoint for OpenTelemetryMetricsEndpoint<E> {
 
         match &res {
             Ok(resp) => {
+                if let Some(path_pattern) = resp.data::<PathPattern>() {
+                    const HTTP_PATH_PATTERN: Key = Key::from_static_str("http.path_pattern");
+                    labels.push(HTTP_PATH_PATTERN.string(path_pattern.0.to_string()));
+                }
+
                 labels.push(trace::HTTP_STATUS_CODE.i64(resp.status().as_u16() as i64));
             }
             Err(err) => {
-                self.error_count.add(1, &labels);
+                if let Some(path_pattern) = err.data::<PathPattern>() {
+                    const HTTP_PATH_PATTERN: Key = Key::from_static_str("http.path_pattern");
+                    labels.push(HTTP_PATH_PATTERN.string(path_pattern.0.to_string()));
+                }
+
+                labels.push(trace::HTTP_STATUS_CODE.i64(err.status().as_u16() as i64));
+                self.error_count.add(&cx, 1, &labels);
                 labels.push(trace::EXCEPTION_MESSAGE.string(err.to_string()));
             }
         }
 
-        self.request_count.add(1, &labels);
+        self.request_count.add(&cx, 1, &labels);
         self.duration
-            .record(elapsed.as_secs_f64() / 1000.0, &labels);
+            .record(&cx, elapsed.as_secs_f64() * 1000.0, &labels);
 
         res
     }

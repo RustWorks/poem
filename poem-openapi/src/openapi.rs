@@ -1,10 +1,13 @@
-use std::{collections::HashSet, marker::PhantomData};
+use std::{
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+};
 
 use poem::{
     endpoint::{make_sync, BoxEndpoint},
     middleware::CookieJarManager,
     web::cookie::CookieKey,
-    Endpoint, EndpointExt, IntoEndpoint, Request, Response, Result, Route,
+    Endpoint, EndpointExt, IntoEndpoint, Request, Response, Result, Route, RouteMethod,
 };
 
 use crate::{
@@ -209,7 +212,7 @@ impl ExtraHeader {
 }
 
 /// An OpenAPI service for Poem.
-pub struct OpenApiService<T, W: ?Sized> {
+pub struct OpenApiService<T, W> {
     api: T,
     _webhook: PhantomData<W>,
     info: MetaInfo,
@@ -218,6 +221,7 @@ pub struct OpenApiService<T, W: ?Sized> {
     cookie_key: Option<CookieKey>,
     extra_response_headers: Vec<(ExtraHeader, MetaSchemaRef, bool)>,
     extra_request_headers: Vec<(ExtraHeader, MetaSchemaRef, bool)>,
+    url_prefix: Option<String>,
 }
 
 impl<T> OpenApiService<T, ()> {
@@ -241,13 +245,14 @@ impl<T> OpenApiService<T, ()> {
             cookie_key: None,
             extra_response_headers: vec![],
             extra_request_headers: vec![],
+            url_prefix: None,
         }
     }
 }
 
-impl<T, W: ?Sized> OpenApiService<T, W> {
+impl<T, W> OpenApiService<T, W> {
     /// Sets the webhooks.
-    pub fn webhooks<W2: ?Sized>(self) -> OpenApiService<T, W2> {
+    pub fn webhooks<W2>(self) -> OpenApiService<T, W2> {
         OpenApiService {
             api: self.api,
             _webhook: PhantomData,
@@ -257,6 +262,7 @@ impl<T, W: ?Sized> OpenApiService<T, W> {
             cookie_key: self.cookie_key,
             extra_response_headers: self.extra_response_headers,
             extra_request_headers: self.extra_request_headers,
+            url_prefix: None,
         }
     }
 
@@ -368,6 +374,35 @@ impl<T, W: ?Sized> OpenApiService<T, W> {
             cookie_key: Some(key),
             ..self
         }
+    }
+
+    /// Sets optional URl prefix to be added to path
+    pub fn url_prefix(self, url_prefix: impl Into<String>) -> Self {
+        Self {
+            url_prefix: Some(url_prefix.into()),
+            ..self
+        }
+    }
+
+    /// Create the OpenAPI Explorer endpoint.
+    #[must_use]
+    #[cfg(feature = "openapi-explorer")]
+    pub fn openapi_explorer(&self) -> impl Endpoint
+    where
+        T: OpenApi,
+        W: Webhook,
+    {
+        crate::ui::openapi_explorer::create_endpoint(&self.spec())
+    }
+
+    /// Create the OpenAPI Explorer HTML
+    #[cfg(feature = "openapi-explorer")]
+    pub fn openapi_explorer_html(&self) -> String
+    where
+        T: OpenApi,
+        W: Webhook,
+    {
+        crate::ui::openapi_explorer::create_html(&self.spec())
     }
 
     /// Create the Swagger UI endpoint.
@@ -530,6 +565,7 @@ impl<T, W: ?Sized> OpenApiService<T, W> {
             webhooks,
             registry,
             external_document: self.external_document.as_ref(),
+            url_prefix: self.url_prefix.as_deref(),
         };
         doc.remove_unused_schemas();
 
@@ -581,13 +617,28 @@ impl<T: OpenApi, W: Webhook> IntoEndpoint for OpenApiService<T, W> {
         {
             if let Some(operation_id) = operation.operation_id {
                 if !operation_ids.insert(operation_id) {
-                    panic!("duplicate operation id: {}", operation_id);
+                    panic!("duplicate operation id: {operation_id}");
                 }
             }
         }
 
-        self.api
-            .add_routes(Route::new())
+        let mut items = HashMap::new();
+        self.api.add_routes(&mut items);
+
+        let route = items
+            .into_iter()
+            .fold(Route::new(), |route, (path, paths)| {
+                route.at(
+                    path,
+                    paths
+                        .into_iter()
+                        .fold(RouteMethod::new(), |route_method, (method, ep)| {
+                            route_method.method(method, ep)
+                        }),
+                )
+            });
+
+        route
             .with(cookie_jar_manager)
             .before(extract_query)
             .map_to_response()

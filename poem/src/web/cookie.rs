@@ -91,7 +91,7 @@ impl Cookie {
     pub fn expires(&self) -> Option<DateTime<Utc>> {
         self.0
             .expires_datetime()
-            .map(|t| Utc.timestamp(t.unix_timestamp(), 0))
+            .and_then(|t| Utc.timestamp_opt(t.unix_timestamp(), 0).single())
     }
 
     /// Returns whether this cookie was marked `HttpOnly` or not.
@@ -619,7 +619,7 @@ mod tests {
         let b = Cookie::new_with_str("b", 200.to_string());
         let c = Cookie::new_with_str("c", 300.to_string());
 
-        let cookie_str = format!("{}; {}", a, b);
+        let cookie_str = format!("{a}; {b}");
 
         let cookie_jar = CookieJar::from_str(&cookie_str).unwrap();
         assert_eq!(cookie_jar.get("a").unwrap(), a);

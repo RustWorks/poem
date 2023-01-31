@@ -194,7 +194,7 @@ fn legal_str(s: impl AsRef<str>) -> String {
     s.as_ref()
         .replace('\\', "\\\\")
         .replace('\"', "\\\"")
-        .replace('r', "\\\r")
+        .replace('\r', "\\\r")
         .replace('\n', "\\\n")
 }
 
@@ -206,6 +206,7 @@ fn gen_headers(headers: &HeaderMap) -> Vec<u8> {
     data
 }
 
+#[cfg(feature = "multipart")]
 #[cfg(test)]
 mod tests {
     use super::*;

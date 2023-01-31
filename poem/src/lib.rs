@@ -74,7 +74,7 @@
 //! In the following example, the `index` function uses 3 extractors to extract
 //! the remote address, HTTP method and URI.
 //!
-//! ```rust
+//! ```
 //! use poem::{
 //!     handler,
 //!     http::{Method, Uri},
@@ -90,7 +90,7 @@
 //! handle the error yourself.
 //!
 //! In the following example, when the [`Query`](web::Query) extractor fails, it
-//! will return a `503 Internal Server` response and the reason for the error.
+//! will return a `500 Internal Server` response and the reason for the error.
 //!
 //! ```
 //! use poem::{

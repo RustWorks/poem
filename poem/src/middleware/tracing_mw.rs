@@ -3,7 +3,8 @@ use std::time::Instant;
 use tracing::{Instrument, Level};
 
 use crate::{
-    web::RealIp, Endpoint, FromRequest, IntoResponse, Middleware, Request, Response, Result,
+    route::PathPattern, web::RealIp, Endpoint, FromRequest, IntoResponse, Middleware, Request,
+    Response, Result,
 };
 
 /// Middleware for [`tracing`](https://crates.io/crates/tracing).
@@ -45,6 +46,10 @@ impl<E: Endpoint> Endpoint for TracingEndpoint<E> {
             uri = %req.original_uri(),
         );
 
+        if let Some(path_pattern) = req.data::<PathPattern>() {
+            span.record("path_pattern", path_pattern.0.as_ref());
+        }
+
         async move {
             let now = Instant::now();
             let res = self.inner.call(req).await;
@@ -62,6 +67,7 @@ impl<E: Endpoint> Endpoint for TracingEndpoint<E> {
                 }
                 Err(err) => {
                     tracing::info!(
+                        status = %err.status(),
                         error = %err,
                         duration = ?duration,
                         "error"

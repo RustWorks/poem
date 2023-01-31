@@ -12,6 +12,7 @@ use crate::{include_file_descriptor_set, Code, Request, Response, Service, Statu
 
 #[allow(private_in_public, unreachable_pub)]
 #[allow(clippy::enum_variant_names)]
+#[allow(clippy::derive_partial_eq_without_eq)]
 mod proto {
     include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1alpha.rs"));
 }
@@ -29,7 +30,7 @@ impl State {
         match self.files.get(filename) {
             None => {
                 Err(Status::new(Code::NotFound)
-                    .with_message(format!("file '{}' not found", filename)))
+                    .with_message(format!("file '{filename}' not found")))
             }
             Some(fd) => {
                 let mut encoded_fd = Vec::new();
@@ -50,7 +51,7 @@ impl State {
         match self.symbols.get(symbol) {
             None => {
                 Err(Status::new(Code::NotFound)
-                    .with_message(format!("symbol '{}' not found", symbol)))
+                    .with_message(format!("symbol '{symbol}' not found")))
             }
             Some(fd) => {
                 let mut encoded_fd = Vec::new();
@@ -232,8 +233,8 @@ impl Reflection {
 
 fn qualified_name(prefix: &str, ty: &str, name: Option<&str>) -> String {
     match name {
-        Some(name) if !prefix.is_empty() => format!("{}.{}", prefix, name),
+        Some(name) if !prefix.is_empty() => format!("{prefix}.{name}"),
         Some(name) => name.to_string(),
-        None => panic!("missing {} name", ty),
+        None => panic!("missing {ty} name"),
     }
 }

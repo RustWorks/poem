@@ -1,9 +1,10 @@
 use std::{
+    collections::HashMap,
     fmt::{self, Debug, Display},
     ops::Deref,
 };
 
-use poem::{Error, FromRequest, Request, RequestBody, Result, Route};
+use poem::{endpoint::BoxEndpoint, http::Method, Error, FromRequest, Request, RequestBody, Result};
 
 use crate::{
     payload::Payload,
@@ -337,6 +338,26 @@ where
     }
 }
 
+#[cfg(feature = "websocket")]
+impl<F, Fut> ApiResponse for poem::web::websocket::WebSocketUpgraded<F>
+where
+    F: FnOnce(poem::web::websocket::WebSocketStream) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future + Send + 'static,
+{
+    fn meta() -> MetaResponses {
+        MetaResponses {
+            responses: vec![MetaResponse {
+                description: "A websocket response",
+                status: Some(101),
+                content: vec![],
+                headers: vec![],
+            }],
+        }
+    }
+
+    fn register(_registry: &mut Registry) {}
+}
+
 /// Represents a OpenAPI tags.
 pub trait Tags {
     /// Register this tag type to registry.
@@ -375,7 +396,7 @@ pub trait OpenApi: Sized {
     fn register(registry: &mut Registry);
 
     /// Adds all API endpoints to the routing object.
-    fn add_routes(self, route: Route) -> Route;
+    fn add_routes(self, route_table: &mut HashMap<String, HashMap<Method, BoxEndpoint<'static>>>);
 }
 
 macro_rules! impl_openapi_for_tuple {
@@ -396,12 +417,11 @@ macro_rules! impl_openapi_for_tuple {
                 )*
             }
 
-            fn add_routes(self, route: Route) -> Route {
-                let route = self.$hn.add_routes(route);
+            fn add_routes(self, route_table: &mut HashMap<String, HashMap<Method, BoxEndpoint<'static>>>) {
+                self.$hn.add_routes(route_table);
                 $(
-                let route = self.$tn.add_routes(route);
+                self.$tn.add_routes(route_table);
                 )*
-                route
             }
         }
     };
@@ -447,8 +467,7 @@ impl OpenApi for () {
 
     fn register(_registry: &mut Registry) {}
 
-    fn add_routes(self, route: Route) -> Route {
-        route
+    fn add_routes(self, _route_table: &mut HashMap<String, HashMap<Method, BoxEndpoint<'static>>>) {
     }
 }
 

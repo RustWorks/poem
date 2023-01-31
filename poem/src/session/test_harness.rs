@@ -16,12 +16,12 @@ pub(crate) struct TestClient {
 impl TestClient {
     pub(crate) async fn call(&mut self, ep: impl Endpoint, action: i32) {
         let mut req = Request::builder()
-            .uri(format!("/{}", action).parse().unwrap())
+            .uri(format!("/{action}").parse().unwrap())
             .finish();
 
         let mut cookie = String::new();
         for (name, value) in &self.cookies {
-            cookie += &format!("{}={};", name, value);
+            cookie += &format!("{name}={value};");
         }
         if !cookie.is_empty() {
             req.headers_mut()
@@ -31,7 +31,7 @@ impl TestClient {
         let resp = ep.call(req).await.unwrap().into_response();
         for s in resp.headers().get_all(header::SET_COOKIE) {
             if let Ok(s) = s.to_str() {
-                let cookie = Cookie::parse(&s).unwrap();
+                let cookie = Cookie::parse(s).unwrap();
 
                 if cookie.value_str().is_empty() {
                     self.cookies.remove(cookie.name());

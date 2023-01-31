@@ -4,9 +4,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-# [1.3.41]
+# [1.3.53] 2023-01-31
+
+- fix: static_files percent encode filename [#495](https://github.com/poem-web/poem/pull/495)
+
+# [1.3.52] 2023-01-13
+
+- Add yaml support [#476](https://github.com/poem-web/poem/pull/476)
+
+# [1.3.51] 2023-01-11
+
+- More compact packing of random bytes in session_id [#437](https://github.com/poem-web/poem/pull/437)
+- Fixes opentelemetry_metrics: Correct duration conversion [#449](https://github.com/poem-web/poem/pull/449)
+- Support fall back to the index file when serving static files [#450](https://github.com/poem-web/poem/pull/450)
+- Record and use PathPattern in response [#462](https://github.com/poem-web/poem/pull/462)
+- listener::rustls: add support for elliptic curve private keys [#460](https://github.com/poem-web/poem/pull/460)
+- Add `Error::set_error_message` to change the error message
+
+# [1.3.50] 2022-12-01
+
+- Fixes not enough randomness in session keys [#430](https://github.com/poem-web/poem/issues/430)
+
+# [1.3.49] 2022-11-21
+
+- Bump `quick-xml` to `0.26.0`
+
+# [1.3.48] 2022-10-25
+
+- Fixes [#416](https://github.com/poem-web/poem/issues/416)
+- Re-enable the `brotli` compression algorithm.
+- Add `Compress::with_quality` and `Compression::with_quality` methods.
+- Add `Compression::algorithms` to specify the enabled algorithms.
+- Make `WebSocketUpgraded<T>` and `BoxWebSocketUpgraded` public [#415](https://github.com/poem-web/poem/issues/415)
+
+# [1.3.47] 2022-10-19
+
+- Fixes [#346](https://github.com/poem-web/poem/issues/346) [#395](https://github.com/poem-web/poem/issues/395)
+- Bump redis version to 0.22.0 [#412](https://github.com/poem-web/poem/pull/412)
+- Bump opentelemetry from `0.17.0` to `0.18.0`
+
+# [1.3.46] 2022-10-17
+
+- Add `path_pattern` to log [#337](https://github.com/poem-web/poem/issues/337)
+- Add support to generics handler [#408](https://github.com/poem-web/poem/issues/408)
+
+# [1.3.45] 2022-09-28
+
+- Add `Error::is_from_response` method.
+
+# [1.3.44] 2022-09-25
+
+- Add `Error::status` method to get the status code of error.
+
+# [1.3.43] 2022-09-23
+
+- Removed dependency on `typed-headers`. [#394](https://github.com/poem-web/poem/issues/394)
+
+# [1.3.42] 2022-09-11
+
+- Fixed `StaticFileEndpoint` returning an incorrect `Content-Length` header when a `Range` header is in the request.
+- Fixed `Compression` middleware returning incorrect `Content-Length` header.
+- Disabled `brotli(CompressionAlgo::BR)` algorithm, very slow, still looking for the reason.
+
+# [1.3.41] 2022-08-16
 
 - Use the real IP as the `remote_addr` in the logs of the Tracing middleware. [#370](https://github.com/poem-web/poem/issues/370)
+- Automatically decode percent-encoded path parameters. [#375](https://github.com/poem-web/poem/issues/375)
+- Fix: trace nested route with original uri. [#371](https://github.com/poem-web/poem/pull/371)
+- Automatically decode percent-encoded path parameters. [#375](https://github.com/poem-web/poem/issues/375)
+- Add `ForceHttps::filter` method to determine if a request should be redirect. [#360](https://github.com/poem-web/poem/issues/360)
+- Add `content-length` for `StaticFileResponse` [#373](https://github.com/poem-web/poem/pull/373)
 
 # [1.3.39] 2022-08-16
 
