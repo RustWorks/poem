@@ -1,9 +1,9 @@
 use std::{collections::BTreeMap, time::Duration};
 
-use redis::{aio::ConnectionLike, Cmd};
+use redis::{Cmd, aio::ConnectionLike};
 use serde_json::Value;
 
-use crate::{error::RedisSessionError, session::session_storage::SessionStorage, Result};
+use crate::{Result, error::RedisSessionError, session::session_storage::SessionStorage};
 
 /// A session storage using redis.
 ///
@@ -22,43 +22,54 @@ impl<T> RedisStorage<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<T: ConnectionLike + Clone + Sync + Send> SessionStorage for RedisStorage<T> {
-    async fn load_session(&self, session_id: &str) -> Result<Option<BTreeMap<String, Value>>> {
+    async fn load_session<'a>(
+        &'a self,
+        session_id: &'a str,
+    ) -> Result<Option<BTreeMap<String, Value>>> {
         let data: Option<String> = Cmd::get(session_id)
             .query_async(&mut self.connection.clone())
             .await
             .map_err(RedisSessionError::Redis)?;
 
         match data {
-            Some(data) => match serde_json::from_str::<BTreeMap<String, Value>>(&data) {
-                Ok(entries) => Ok(Some(entries)),
-                Err(_) => Ok(None),
-            },
+            Some(data) => {
+                #[cfg(not(feature = "sonic-rs"))]
+                let map = serde_json::from_str::<BTreeMap<String, Value>>(&data);
+                #[cfg(feature = "sonic-rs")]
+                let map = sonic_rs::from_str::<BTreeMap<String, Value>>(&data);
+                match map {
+                    Ok(entries) => Ok(Some(entries)),
+                    Err(_) => Ok(None),
+                }
+            }
             None => Ok(None),
         }
     }
 
-    async fn update_session(
-        &self,
-        session_id: &str,
-        entries: &BTreeMap<String, Value>,
+    async fn update_session<'a>(
+        &'a self,
+        session_id: &'a str,
+        entries: &'a BTreeMap<String, Value>,
         expires: Option<Duration>,
     ) -> Result<()> {
+        #[cfg(not(feature = "sonic-rs"))]
         let value = serde_json::to_string(entries).unwrap_or_default();
+        #[cfg(feature = "sonic-rs")]
+        let value = sonic_rs::to_string(entries).unwrap_or_default();
         let cmd = match expires {
-            Some(expires) => Cmd::set_ex(session_id, value, expires.as_secs() as usize),
+            Some(expires) => Cmd::set_ex(session_id, value, expires.as_secs()),
             None => Cmd::set(session_id, value),
         };
-        cmd.query_async(&mut self.connection.clone())
+        cmd.query_async::<()>(&mut self.connection.clone())
             .await
             .map_err(RedisSessionError::Redis)?;
         Ok(())
     }
 
-    async fn remove_session(&self, session_id: &str) -> Result<()> {
+    async fn remove_session<'a>(&'a self, session_id: &'a str) -> Result<()> {
         Cmd::del(session_id)
-            .query_async(&mut self.connection.clone())
+            .query_async::<()>(&mut self.connection.clone())
             .await
             .map_err(RedisSessionError::Redis)?;
         Ok(())
@@ -67,15 +78,15 @@ impl<T: ConnectionLike + Clone + Sync + Send> SessionStorage for RedisStorage<T>
 
 #[cfg(test)]
 mod tests {
-    use redis::{aio::ConnectionManager, Client, ConnectionLike};
+    use redis::{Client, ConnectionLike, aio::ConnectionManager};
 
     use super::*;
     use crate::{
-        session::{
-            test_harness::{index, TestClient},
-            CookieConfig, ServerSession,
-        },
         EndpointExt, Route,
+        session::{
+            CookieConfig, ServerSession,
+            test_harness::{TestClient, index},
+        },
     };
 
     #[tokio::test]

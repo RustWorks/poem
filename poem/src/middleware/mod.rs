@@ -16,6 +16,8 @@ mod opentelemetry_metrics;
 #[cfg(feature = "opentelemetry")]
 mod opentelemetry_tracing;
 mod propagate_header;
+#[cfg(feature = "requestid")]
+mod requestid;
 mod sensitive_header;
 mod set_header;
 mod size_limit;
@@ -24,6 +26,8 @@ mod tokio_metrics_mw;
 #[cfg(feature = "tower-compat")]
 mod tower_compat;
 mod tracing_mw;
+
+use std::marker::PhantomData;
 
 #[cfg(feature = "compression")]
 pub use self::compression::{Compression, CompressionEndpoint};
@@ -35,6 +39,8 @@ pub use self::csrf::{Csrf, CsrfEndpoint};
 pub use self::opentelemetry_metrics::{OpenTelemetryMetrics, OpenTelemetryMetricsEndpoint};
 #[cfg(feature = "opentelemetry")]
 pub use self::opentelemetry_tracing::{OpenTelemetryTracing, OpenTelemetryTracingEndpoint};
+#[cfg(feature = "requestid")]
+pub use self::requestid::{ReqId, RequestId, RequestIdEndpoint, ReuseId};
 #[cfg(feature = "tokio-metrics")]
 pub use self::tokio_metrics_mw::{TokioMetrics, TokioMetricsEndpoint};
 #[cfg(feature = "tower-compat")]
@@ -51,18 +57,18 @@ pub use self::{
     size_limit::{SizeLimit, SizeLimitEndpoint},
     tracing_mw::{Tracing, TracingEndpoint},
 };
-use crate::endpoint::Endpoint;
+use crate::endpoint::{EitherEndpoint, Endpoint};
 
 /// Represents a middleware trait.
 ///
-/// # Create you own middleware
+/// # Create your own middleware
 ///
 /// ```
 /// use poem::{
-///     handler, test::TestClient, web::Data, Endpoint, EndpointExt, Middleware, Request, Result,
+///     Endpoint, EndpointExt, Middleware, Request, Result, handler, test::TestClient, web::Data,
 /// };
 ///
-/// /// A middleware that extract token from HTTP headers.
+/// /// A middleware that extracts token from HTTP headers.
 /// struct TokenMiddleware;
 ///
 /// impl<E: Endpoint> Middleware<E> for TokenMiddleware {
@@ -81,9 +87,9 @@ use crate::endpoint::Endpoint;
 /// const TOKEN_HEADER: &str = "X-Token";
 ///
 /// /// Token data
+/// #[derive(Clone)]
 /// struct Token(String);
 ///
-/// #[poem::async_trait]
 /// impl<E: Endpoint> Endpoint for TokenMiddlewareImpl<E> {
 ///     type Output = E::Output;
 ///
@@ -128,7 +134,7 @@ use crate::endpoint::Endpoint;
 /// use std::sync::Arc;
 ///
 /// use poem::{
-///     handler, test::TestClient, web::Data, Endpoint, EndpointExt, IntoResponse, Request, Result,
+///     Endpoint, EndpointExt, IntoResponse, Request, Result, handler, test::TestClient, web::Data,
 /// };
 /// const TOKEN_HEADER: &str = "X-Token";
 ///
@@ -138,6 +144,7 @@ use crate::endpoint::Endpoint;
 /// }
 ///
 /// /// Token data
+/// #[derive(Clone)]
 /// struct Token(String);
 ///
 /// async fn token_middleware<E: Endpoint>(next: E, mut req: Request) -> Result<E::Output> {
@@ -174,6 +181,193 @@ pub trait Middleware<E: Endpoint> {
 
     /// Transform the input [`Endpoint`] to another one.
     fn transform(&self, ep: E) -> Self::Output;
+
+    /// Create a new middleware by combining two middlewares.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use poem::{
+    ///     Endpoint, EndpointExt, Middleware, Request, Result, handler, middleware::SetHeader,
+    /// };
+    ///
+    /// #[handler]
+    /// fn index() -> &'static str {
+    ///     "hello"
+    /// }
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), std::io::Error> {
+    ///     let ep = index.with(
+    ///         SetHeader::new()
+    ///             .appending("myheader", "a")
+    ///             .combine(SetHeader::new().appending("myheader", "b")),
+    ///     );
+    ///
+    ///     let resp = ep.call(Request::default()).await.unwrap();
+    ///     let values = resp
+    ///         .headers()
+    ///         .get_all("myheader")
+    ///         .iter()
+    ///         .flat_map(|value| value.to_str().ok())
+    ///         .collect::<Vec<_>>();
+    ///     assert_eq!(values, vec!["a", "b"]);
+    ///     Ok(())
+    /// }
+    /// ```
+    fn combine<T>(self, other: T) -> CombineMiddleware<Self, T, E>
+    where
+        T: Middleware<Self::Output> + Sized,
+        Self: Sized,
+    {
+        CombineMiddleware {
+            a: self,
+            b: other,
+            _mark: PhantomData,
+        }
+    }
+
+    /// if `enable` is `true` then combine the middleware.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use poem::{
+    ///     Endpoint, EndpointExt, Middleware, Request, Result, handler, middleware::SetHeader,
+    /// };
+    ///
+    /// #[handler]
+    /// fn index() -> &'static str {
+    ///     "hello"
+    /// }
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), std::io::Error> {
+    ///     let ep1 = index.with(
+    ///         SetHeader::new()
+    ///             .appending("myheader", "a")
+    ///             .combine_if(false, SetHeader::new().appending("myheader", "b")),
+    ///     );
+    ///
+    ///     let ep2 = index.with(
+    ///         SetHeader::new()
+    ///             .appending("myheader", "a")
+    ///             .combine_if(true, SetHeader::new().appending("myheader", "b")),
+    ///     );
+    ///
+    ///     let resp = ep1.call(Request::default()).await.unwrap();
+    ///     let values = resp
+    ///         .headers()
+    ///         .get_all("myheader")
+    ///         .iter()
+    ///         .flat_map(|value| value.to_str().ok())
+    ///         .collect::<Vec<_>>();
+    ///     assert_eq!(values, vec!["a"]);
+    ///
+    ///     let resp = ep2.call(Request::default()).await.unwrap();
+    ///     let values = resp
+    ///         .headers()
+    ///         .get_all("myheader")
+    ///         .iter()
+    ///         .flat_map(|value| value.to_str().ok())
+    ///         .collect::<Vec<_>>();
+    ///     assert_eq!(values, vec!["a", "b"]);
+    ///     Ok(())
+    /// }
+    /// ```
+    fn combine_if<T>(
+        self,
+        enable: bool,
+        other: T,
+    ) -> EitherMiddleware<Self, CombineMiddleware<Self, T, E>, E>
+    where
+        T: Middleware<Self::Output> + Sized,
+        Self: Sized,
+    {
+        if !enable {
+            EitherMiddleware::left(self)
+        } else {
+            EitherMiddleware::right(self.combine(other))
+        }
+    }
+}
+
+impl<E: Endpoint> Middleware<E> for () {
+    type Output = E;
+
+    #[inline]
+    fn transform(&self, ep: E) -> Self::Output {
+        ep
+    }
+}
+
+impl<E: Endpoint, T: Middleware<E>> Middleware<E> for &T {
+    type Output = T::Output;
+
+    fn transform(&self, ep: E) -> Self::Output {
+        T::transform(self, ep)
+    }
+}
+
+/// A middleware that combines two middlewares.
+pub struct CombineMiddleware<A, B, E> {
+    a: A,
+    b: B,
+    _mark: PhantomData<E>,
+}
+
+impl<A, B, E> Middleware<E> for CombineMiddleware<A, B, E>
+where
+    A: Middleware<E>,
+    B: Middleware<A::Output>,
+    E: Endpoint,
+{
+    type Output = B::Output;
+
+    #[inline]
+    fn transform(&self, ep: E) -> Self::Output {
+        self.b.transform(self.a.transform(ep))
+    }
+}
+
+/// The enum `EitherMiddleware` with variants `Left` and `Right` is a general
+/// purpose sum type with two cases.
+pub enum EitherMiddleware<A, B, E> {
+    /// A middleware of type `A`
+    A(A, PhantomData<E>),
+    /// B middleware of type `B`
+    B(B, PhantomData<E>),
+}
+
+impl<A, B, E> EitherMiddleware<A, B, E> {
+    /// Create a new `EitherMiddleware` with the left variant.
+    #[inline]
+    pub fn left(a: A) -> Self {
+        EitherMiddleware::A(a, PhantomData)
+    }
+
+    /// Create a new `EitherMiddleware` with the right variant.
+    #[inline]
+    pub fn right(b: B) -> Self {
+        EitherMiddleware::B(b, PhantomData)
+    }
+}
+
+impl<A, B, E> Middleware<E> for EitherMiddleware<A, B, E>
+where
+    A: Middleware<E>,
+    B: Middleware<E>,
+    E: Endpoint,
+{
+    type Output = EitherEndpoint<A::Output, B::Output>;
+
+    #[inline]
+    fn transform(&self, ep: E) -> Self::Output {
+        match self {
+            EitherMiddleware::A(a, _) => EitherEndpoint::A(a.transform(ep)),
+            EitherMiddleware::B(b, _) => EitherEndpoint::B(b.transform(ep)),
+        }
+    }
 }
 
 poem_derive::generate_implement_middlewares!();
@@ -203,11 +397,10 @@ pub fn make<T>(f: T) -> FnMiddleware<T> {
 mod tests {
     use super::*;
     use crate::{
-        handler,
-        http::{header::HeaderName, HeaderValue},
+        EndpointExt, IntoResponse, Request, Response, Result, handler,
+        http::{HeaderValue, header::HeaderName},
         test::TestClient,
         web::Data,
-        EndpointExt, IntoResponse, Request, Response, Result,
     };
 
     #[tokio::test]
@@ -223,7 +416,6 @@ mod tests {
             value: HeaderValue,
         }
 
-        #[async_trait::async_trait]
         impl<E: Endpoint> Endpoint for AddHeader<E> {
             type Output = Response;
 

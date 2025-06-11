@@ -1,12 +1,12 @@
 use std::{borrow::Cow, sync::Arc};
 
-use http::{header, uri::Scheme, Uri};
+use http::{Uri, header, uri::Scheme};
 
-use crate::{web::Redirect, Endpoint, IntoResponse, Middleware, Request, Response, Result};
+use crate::{Endpoint, IntoResponse, Middleware, Request, Response, Result, web::Redirect};
 
 type FilterFn = Arc<dyn Fn(&Request) -> bool + Send + Sync>;
 
-/// Middleware for force redirect to HTTPS uri.
+/// Middleware which forces redirects to a HTTPS uri.
 #[derive(Default)]
 pub struct ForceHttps {
     https_port: Option<u16>,
@@ -14,12 +14,12 @@ pub struct ForceHttps {
 }
 
 impl ForceHttps {
-    /// Create new `ForceHttps` middleware.
+    /// Create a new `ForceHttps` middleware.
     pub fn new() -> Self {
         Default::default()
     }
 
-    /// Specify https port.
+    /// Specify the https port.
     #[must_use]
     pub fn https_port(self, port: u16) -> Self {
         Self {
@@ -53,14 +53,13 @@ where
     }
 }
 
-/// Endpoint for ForceHttps middleware.
+/// Endpoint for the ForceHttps middleware.
 pub struct ForceHttpsEndpoint<E> {
     inner: E,
     https_port: Option<u16>,
     filter_fn: Option<FilterFn>,
 }
 
-#[async_trait::async_trait]
 impl<E> Endpoint for ForceHttpsEndpoint<E>
 where
     E: Endpoint,

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde::{ser::SerializeMap, Serialize, Serializer};
+use serde::{Serialize, Serializer, ser::SerializeMap};
 
 use crate::registry::{
     MetaApi, MetaExternalDocument, MetaInfo, MetaPath, MetaResponses, MetaSchema, MetaSchemaRef,
@@ -24,14 +24,14 @@ impl Serialize for MetaSchemaRef {
 
 struct PathMap<'a>(&'a [MetaApi], Option<&'a str>);
 
-impl<'a> Serialize for PathMap<'a> {
+impl Serialize for PathMap<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut s = serializer.serialize_map(Some(self.0.len()))?;
         for api in self.0 {
             for path in &api.paths {
                 match self.1 {
                     Some(p) => s.serialize_entry(&format!("{}{}", p, path.path), path)?,
-                    None => s.serialize_entry(path.path, path)?,
+                    None => s.serialize_entry(&path.path, path)?,
                 }
             }
         }
@@ -57,7 +57,10 @@ impl Serialize for MetaResponses {
         for resp in &self.responses {
             match resp.status {
                 Some(status) => s.serialize_entry(&format!("{status}"), resp)?,
-                None => s.serialize_entry("default", resp)?,
+                None => match &resp.status_range {
+                    Some(status_range) => s.serialize_entry(status_range, resp)?,
+                    None => s.serialize_entry("default", resp)?,
+                },
             }
         }
         s.end()
@@ -66,11 +69,16 @@ impl Serialize for MetaResponses {
 
 struct WebhookMap<'a>(&'a [MetaWebhook]);
 
-impl<'a> Serialize for WebhookMap<'a> {
+impl Serialize for WebhookMap<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut s = serializer.serialize_map(Some(self.0.len()))?;
         for webhook in self.0 {
-            s.serialize_entry(&webhook.name, &webhook.operation)?;
+            let mut inner_map = BTreeMap::new();
+            inner_map.insert(
+                webhook.operation.method.to_string().to_lowercase(),
+                &webhook.operation,
+            );
+            s.serialize_entry(&webhook.name, &inner_map)?;
         }
         s.end()
     }
@@ -86,7 +94,7 @@ pub(crate) struct Document<'a> {
     pub(crate) url_prefix: Option<&'a str>,
 }
 
-impl<'a> Serialize for Document<'a> {
+impl Serialize for Document<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]

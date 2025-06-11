@@ -6,7 +6,6 @@ use poem::{
 struct Token(String);
 
 // Implements a token extractor
-#[poem::async_trait]
 impl<'a> FromRequest<'a> for Token {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         let token = req
@@ -31,7 +30,7 @@ async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::fmt::init();
 
     let app = Route::new().at("/", get(index));
-    Server::new(TcpListener::bind("127.0.0.1:3000"))
+    Server::new(TcpListener::bind("0.0.0.0:3000"))
         .run(app)
         .await
 }

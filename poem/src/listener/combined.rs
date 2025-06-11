@@ -24,7 +24,6 @@ impl<A, B> Combined<A, B> {
     }
 }
 
-#[async_trait::async_trait]
 impl<A: Listener, B: Listener> Listener for Combined<A, B> {
     type Acceptor = Combined<A::Acceptor, B::Acceptor>;
 
@@ -36,7 +35,6 @@ impl<A: Listener, B: Listener> Listener for Combined<A, B> {
     }
 }
 
-#[async_trait::async_trait]
 impl<A: Acceptor, B: Acceptor> Acceptor for Combined<A, B> {
     type Io = CombinedStream<A::Io, B::Io>;
 
@@ -44,7 +42,7 @@ impl<A: Acceptor, B: Acceptor> Acceptor for Combined<A, B> {
         self.a
             .local_addr()
             .into_iter()
-            .chain(self.b.local_addr().into_iter())
+            .chain(self.b.local_addr())
             .collect()
     }
 

@@ -3,13 +3,13 @@ use std::ops::{Deref, DerefMut};
 use serde::de::DeserializeOwned;
 
 use crate::{
+    FromRequest, Request, Result,
     error::ParseFormError,
     http::{
-        header::{self},
         Method,
+        header::{self},
     },
     web::RequestBody,
-    FromRequest, Request, Result,
 };
 
 /// An extractor that can deserialize some type from query string or body.
@@ -29,11 +29,10 @@ use crate::{
 ///
 /// ```
 /// use poem::{
-///     get, handler,
+///     Endpoint, Request, Route, get, handler,
 ///     http::{Method, StatusCode, Uri},
 ///     test::TestClient,
 ///     web::Form,
-///     Endpoint, Request, Route,
 /// };
 /// use serde::Deserialize;
 ///
@@ -86,7 +85,6 @@ impl<T> DerefMut for Form<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a, T: DeserializeOwned> FromRequest<'a> for Form<T> {
     async fn from_request(req: &'a Request, body: &mut RequestBody) -> Result<Self> {
         if req.method() == Method::GET {
@@ -119,7 +117,7 @@ fn is_form_content_type(content_type: &str) -> bool {
         && (content_type.subtype() == "x-www-form-urlencoded"
         || content_type
             .suffix()
-            .map_or(false, |v| v == "x-www-form-urlencoded")))
+            .is_some_and(|v| v == "x-www-form-urlencoded")))
 }
 
 #[cfg(test)]

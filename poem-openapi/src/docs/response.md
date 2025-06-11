@@ -1,4 +1,4 @@
-Define a OpenAPI response.
+Define an OpenAPI response.
 
 # Macro parameters
 
@@ -13,6 +13,7 @@ Define a OpenAPI response.
 | Attribute    | description                                                  | Type                                                       | Optional |
 |--------------|--------------------------------------------------------------|------------------------------------------------------------|----------|
 | status       | HTTP status code. If omitted, it is a default response type. | u16                                                        | Y        |
+| status_range | Specify a range of HTTP status codes.                        | string                                                     | Y        |
 | content_type | Specify the content type.                                    | string                                                     | Y        |
 | actual_type  | Specifies the actual response type                           | string                                                     | Y        |
 | header       | Add an extra header                                          | [`ExtraHeader`](macro@ApiResponse#extra-header-parameters) | Y        |
@@ -28,7 +29,7 @@ Define a OpenAPI response.
 | Attribute   | description        | Type   | Optional |
 |-------------|--------------------|--------|----------|
 | name        | Header name        | String | N        |
-| type        | Header type        | String | N        |
+| ty          | Header type        | String | N        |
 | description | Header description | String | Y        |
 | deprecated  | Header deprecated  | bool   | Y        |
 
@@ -53,12 +54,29 @@ use poem_openapi::ApiResponse;
 
 #[derive(ApiResponse)]
 #[oai(
-    header(name = "X-ExtraHeader-1", type = "String"),
-    header(name = "X-ExtraHeader-2", type = "i32"),
+    header(name = "X-ExtraHeader-1", ty = "String"),
+    header(name = "X-ExtraHeader-2", ty = "i32"),
 )]
 enum CreateUserResponse {
-    #[oai(status = 200, header(name = "X-ExtraHeader-3", type = "f32"))]
+    #[oai(status = 200, header(name = "X-ExtraHeader-3", ty = "f32"))]
     Ok,
+}
+```
+
+# Example status range
+
+```rust
+use poem::http::StatusCode;
+use poem_openapi::{payload::PlainText, ApiResponse};
+
+#[derive(ApiResponse)]
+enum CreateUserResponse {
+    #[oai(status_range = "2XX")]
+    Ok(StatusCode, PlainText<String>),
+    #[oai(status_range = "4XX")]
+    ClientError(StatusCode),
+    #[oai(status_range = "5XX")]
+    ServerError(StatusCode),
 }
 ```
 

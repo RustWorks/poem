@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use poem_openapi::{
+    Enum, NewType, Object, OpenApi,
     registry::{MetaExternalDocument, MetaSchema, MetaSchemaRef, Registry},
     types::{Example, ParseFromJSON, ToJSON, Type},
-    Enum, NewType, Object, OpenApi,
 };
 use serde_json::json;
 
@@ -43,10 +45,7 @@ fn generics() {
         delete_user: T2,
     }
 
-    assert_eq!(
-        <Obj<i32, i64>>::name(),
-        "Obj<integer(int32), integer(int64)>"
-    );
+    assert_eq!(<Obj<i32, i64>>::name(), "Obj_integer_int32_integer_int64");
     let meta = get_meta::<Obj<i32, i64>>();
     assert_eq!(meta.properties[0].1.unwrap_inline().ty, "integer");
     assert_eq!(meta.properties[0].1.unwrap_inline().format, Some("int32"));
@@ -54,10 +53,7 @@ fn generics() {
     assert_eq!(meta.properties[1].1.unwrap_inline().ty, "integer");
     assert_eq!(meta.properties[1].1.unwrap_inline().format, Some("int64"));
 
-    assert_eq!(
-        <Obj<f32, f64>>::name(),
-        "Obj<number(float), number(double)>"
-    );
+    assert_eq!(<Obj<f32, f64>>::name(), "Obj_number_float_number_double");
     let meta = get_meta::<Obj<f32, f64>>();
     assert_eq!(meta.properties[0].1.unwrap_inline().ty, "number");
     assert_eq!(meta.properties[0].1.unwrap_inline().format, Some("float"));
@@ -192,6 +188,18 @@ fn field_rename() {
 
     let meta = get_meta::<Obj>();
     assert_eq!(meta.properties[0].0, "b");
+}
+
+#[test]
+fn field_deprecated() {
+    #[derive(Object)]
+    struct Obj {
+        #[oai(deprecated)]
+        a: i32,
+    }
+
+    let meta = get_meta::<Obj>();
+    assert_eq!(meta.properties[0].1.unwrap_inline().deprecated, true);
 }
 
 #[test]
@@ -386,6 +394,33 @@ fn read_only() {
         .unwrap_err()
         .into_message(),
         r#"failed to parse "Obj": properties `id` is read only."#,
+    );
+}
+
+#[cfg(feature = "time")]
+#[test]
+fn read_only_with_default() {
+    use time::OffsetDateTime;
+    fn default_offset_datetime() -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(1694045893).unwrap()
+    }
+
+    #[derive(Debug, Object, PartialEq)]
+    struct Obj {
+        #[oai(read_only, default = "default_offset_datetime")]
+        time: OffsetDateTime,
+    }
+
+    let meta = get_meta::<Obj>();
+    assert_eq!(meta.properties[0].0, "time");
+    assert!(meta.properties[0].1.unwrap_inline().read_only);
+    assert!(meta.properties[0].1.unwrap_inline().default.is_none());
+
+    assert_eq!(
+        Obj::parse_from_json(Some(serde_json::json!({}))).unwrap(),
+        Obj {
+            time: OffsetDateTime::from_unix_timestamp(1694045893).unwrap()
+        }
     );
 }
 
@@ -630,6 +665,47 @@ fn flatten_field() {
     assert_eq!(
         Obj::parse_from_json(Some(json!({"a": 100, "b": 200, "c":
 300})))
+        .unwrap(),
+        obj
+    );
+}
+
+#[test]
+fn flatten_hash_map() {
+    #[derive(Object, Debug, Eq, PartialEq)]
+    struct Obj1 {
+        a: i32,
+        b: i32,
+    }
+
+    #[derive(Object, Debug, Eq, PartialEq)]
+    struct Obj {
+        c: i32,
+        #[oai(flatten)]
+        map: HashMap<String, Obj1>,
+    }
+
+    let meta = get_meta::<Obj>();
+    assert_eq!(meta.required, vec!["c"]);
+    assert_eq!(meta.properties[0].0, "c");
+    assert_eq!(
+        meta.additional_properties,
+        Some(Box::new(MetaSchemaRef::Reference("Obj1".to_owned())))
+    );
+
+    let mut map = HashMap::new();
+    map.insert("k1".to_owned(), Obj1 { a: 100, b: 200 });
+    map.insert("k2".to_owned(), Obj1 { a: 300, b: 400 });
+    let obj = Obj { map, c: 300 };
+
+    assert_eq!(
+        obj.to_json(),
+        Some(json!({"k1": { "a": 100, "b": 200 }, "k2": { "a": 300, "b": 400 }, "c": 300}))
+    );
+    assert_eq!(
+        Obj::parse_from_json(Some(
+            json!({"k1": { "a": 100, "b": 200 }, "k2": { "a": 300, "b": 400 }, "c": 300})
+        ))
         .unwrap(),
         obj
     );
@@ -991,5 +1067,68 @@ fn object_default_override_by_field() {
             a: 500,
             b: "def".to_string()
         }
+    );
+}
+
+// NOTE(Rennorb): The `serialize_with` and `deserialize_with` attributes don't
+// add any additional validation, it's up to the library consumer to use them in
+// ways were they don't violate the OpenAPI specification of the underlying
+// type.
+//
+// In practice `serialize_with` only exists for the rounding case below, which
+// could not be implemented in a different way before this (only by using a
+// larger type), and `deserialize_with` just exists for parity.
+
+#[test]
+fn serialize_with() {
+    #[derive(Debug, Object)]
+    struct Obj {
+        #[oai(serialize_with = "round")]
+        a: f32,
+        b: f32,
+    }
+
+    // NOTE(Rennorb): Function signature in complice with `to_json` in the Type
+    // system. Would prefer the usual way of implementing this with a serializer
+    // reference, but this has to do for now.
+    fn round(v: &f32) -> Option<serde_json::Value> {
+        Some(serde_json::Value::from((*v as f64 * 1e5).round() / 1e5))
+    }
+
+    let obj = Obj { a: 0.3, b: 0.3 };
+
+    assert_eq!(obj.to_json(), Some(json!({"a": 0.3f64, "b": 0.3f32})));
+}
+
+#[test]
+fn deserialize_with() {
+    #[derive(Debug, PartialEq, Object)]
+    struct Obj {
+        #[oai(deserialize_with = "add")]
+        a: i32,
+    }
+
+    // NOTE(Rennorb): Function signature in complice with `parse_from_json` in the
+    // Type system. Would prefer the usual way of implementing this with a
+    // serializer reference, but this has to do for now.
+    fn add(value: Option<serde_json::Value>) -> poem_openapi::types::ParseResult<i32> {
+        value
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.split_once('+'))
+            .and_then(|(a, b)| {
+                let parse_a = a.trim().parse::<i32>();
+                let parse_b = b.trim().parse::<i32>();
+                match (parse_a, parse_b) {
+                    (Ok(int_a), Ok(int_b)) => Some(int_a + int_b),
+                    _ => None,
+                }
+            })
+            .ok_or(poem_openapi::types::ParseError::custom("Unknown error")) // bad error, but its good enough for tests
+    }
+
+    assert_eq!(
+        Obj::parse_from_json(Some(json!({"a": "3 + 4"}))).unwrap(),
+        Obj { a: 7 }
     );
 }

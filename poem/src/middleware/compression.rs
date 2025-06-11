@@ -3,9 +3,9 @@ use std::{collections::HashSet, str::FromStr};
 use headers::HeaderMap;
 
 use crate::{
+    Body, Endpoint, IntoResponse, Middleware, Request, Response, Result,
     http::header,
     web::{Compress, CompressionAlgo, CompressionLevel},
-    Body, Endpoint, IntoResponse, Middleware, Request, Response, Result,
 };
 
 enum ContentCoding {
@@ -13,6 +13,7 @@ enum ContentCoding {
     Deflate,
     Gzip,
     Star,
+    Zstd,
 }
 
 impl FromStr for ContentCoding {
@@ -27,6 +28,8 @@ impl FromStr for ContentCoding {
             Ok(ContentCoding::Brotli)
         } else if s == "*" {
             Ok(ContentCoding::Star)
+        } else if s == "zsdt" {
+            Ok(ContentCoding::Zstd)
         } else {
             Err(())
         }
@@ -58,6 +61,7 @@ fn parse_accept_encoding(
                         enabled_algorithms.contains(&CompressionAlgo::DEFLATE)
                     }
                     ContentCoding::Gzip => enabled_algorithms.contains(&CompressionAlgo::GZIP),
+                    ContentCoding::Zstd => enabled_algorithms.contains(&CompressionAlgo::ZSTD),
                     _ => true,
                 }
             } else {
@@ -68,11 +72,11 @@ fn parse_accept_encoding(
         .map(|(coding, _)| coding)
 }
 
-/// Middleware for decompress request body and compress response body.
+/// Middleware to decompress the request body and compress the response body.
 ///
-/// It selects the decompression algorithm according to the request
-/// `Content-Encoding` header, and selects the compression algorithm according
-/// to the request `Accept-Encoding` header.
+/// The decompression algorithm is selected according to the request
+/// `Content-Encoding` header, and the compression algorithm is selected
+/// according to the request `Accept-Encoding` header.
 #[cfg_attr(docsrs, doc(cfg(feature = "compression")))]
 #[derive(Default)]
 pub struct Compression {
@@ -97,7 +101,7 @@ impl Compression {
         }
     }
 
-    /// Specify the enabled algorithms (default to all)
+    /// Specify the enabled algorithms (defaults to all)
     #[must_use]
     #[inline]
     pub fn algorithms(self, algorithms: impl IntoIterator<Item = CompressionAlgo>) -> Self {
@@ -120,7 +124,7 @@ impl<E: Endpoint> Middleware<E> for Compression {
     }
 }
 
-/// Endpoint for Compression middleware.
+/// Endpoint for the Compression middleware.
 #[cfg_attr(docsrs, doc(cfg(feature = "compression")))]
 pub struct CompressionEndpoint<E: Endpoint> {
     ep: E,
@@ -134,11 +138,11 @@ fn coding_priority(c: &ContentCoding) -> u8 {
         ContentCoding::Deflate => 1,
         ContentCoding::Gzip => 2,
         ContentCoding::Brotli => 3,
+        ContentCoding::Zstd => 4,
         _ => 0,
     }
 }
 
-#[async_trait::async_trait]
 impl<E: Endpoint> Endpoint for CompressionEndpoint<E> {
     type Output = Response;
 
@@ -159,7 +163,8 @@ impl<E: Endpoint> Endpoint for CompressionEndpoint<E> {
             parse_accept_encoding(req.headers(), &self.algorithms).map(|coding| match coding {
                 ContentCoding::Gzip => CompressionAlgo::GZIP,
                 ContentCoding::Deflate => CompressionAlgo::DEFLATE,
-                ContentCoding::Star | ContentCoding::Brotli => CompressionAlgo::BR,
+                ContentCoding::Brotli => CompressionAlgo::BR,
+                ContentCoding::Star | ContentCoding::Zstd => CompressionAlgo::ZSTD,
             });
 
         let resp = self.ep.call(req).await?;
@@ -181,7 +186,7 @@ mod tests {
     use tokio::io::AsyncReadExt;
 
     use super::*;
-    use crate::{handler, test::TestClient, EndpointExt};
+    use crate::{EndpointExt, handler, test::TestClient};
 
     const DATA: &str = "abcdefghijklmnopqrstuvwxyz1234567890";
     const DATA_REV: &str = "0987654321zyxwvutsrqponmlkjihgfedcba";
@@ -251,10 +256,10 @@ mod tests {
             .send()
             .await;
         resp.assert_status_is_ok();
-        resp.assert_header("Content-Encoding", "br");
+        resp.assert_header("Content-Encoding", "zstd");
 
         let mut data = Vec::new();
-        let mut reader = CompressionAlgo::BR.decompress(resp.0.into_body().into_async_read());
+        let mut reader = CompressionAlgo::ZSTD.decompress(resp.0.into_body().into_async_read());
         reader.read_to_end(&mut data).await.unwrap();
         assert_eq!(data, DATA_REV.as_bytes());
     }

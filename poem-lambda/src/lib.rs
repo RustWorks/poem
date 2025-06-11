@@ -3,7 +3,7 @@
 #![doc(html_favicon_url = "https://raw.githubusercontent.com/poem-web/poem/master/favicon.ico")]
 #![doc(html_logo_url = "https://raw.githubusercontent.com/poem-web/poem/master/logo.png")]
 #![forbid(unsafe_code)]
-#![deny(private_in_public, unreachable_pub)]
+#![deny(unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
@@ -11,7 +11,7 @@ use std::{io::ErrorKind, ops::Deref, sync::Arc};
 
 pub use lambda_http::lambda_runtime::Error;
 use lambda_http::{
-    lambda_runtime, service_fn, Body as LambdaBody, Request as LambdaRequest, RequestExt,
+    Body as LambdaBody, Request as LambdaRequest, RequestExt, lambda_runtime, service_fn,
 };
 use poem::{Body, Endpoint, EndpointExt, FromRequest, IntoEndpoint, Request, RequestBody, Result};
 
@@ -22,7 +22,7 @@ use poem::{Body, Endpoint, EndpointExt, FromRequest, IntoEndpoint, Request, Requ
 /// # Example
 ///
 /// ```
-/// use poem::{handler, Request};
+/// use poem::{Request, handler};
 /// use poem_lambda::Context;
 ///
 /// #[handler]
@@ -30,6 +30,7 @@ use poem::{Body, Endpoint, EndpointExt, FromRequest, IntoEndpoint, Request, Requ
 ///     println!("request_id: {}", ctx.request_id);
 /// }
 /// ```
+#[derive(Debug, Clone)]
 pub struct Context(pub lambda_runtime::Context);
 
 impl Deref for Context {
@@ -109,7 +110,6 @@ fn from_lambda_request(req: LambdaRequest) -> Request {
     req
 }
 
-#[poem::async_trait]
 impl<'a> FromRequest<'a> for &'a Context {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         let ctx = match req.extensions().get::<Context>() {

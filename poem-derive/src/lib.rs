@@ -3,7 +3,7 @@
 #![doc(html_favicon_url = "https://raw.githubusercontent.com/poem-web/poem/master/favicon.ico")]
 #![doc(html_logo_url = "https://raw.githubusercontent.com/poem-web/poem/master/logo.png")]
 #![forbid(unsafe_code)]
-#![deny(private_in_public, unreachable_pub)]
+#![deny(unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
@@ -11,9 +11,7 @@ mod utils;
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{
-    parse_macro_input, AttributeArgs, FnArg, GenericParam, ItemFn, Member, Meta, NestedMeta, Result,
-};
+use syn::{FnArg, GenericParam, ItemFn, Member, Result, parse_macro_input};
 
 /// Wrap an asynchronous function as an `Endpoint`.
 ///
@@ -26,14 +24,15 @@ use syn::{
 /// ```
 #[proc_macro_attribute]
 pub fn handler(args: TokenStream, input: TokenStream) -> TokenStream {
-    let args: AttributeArgs = parse_macro_input!(args as AttributeArgs);
     let mut internal = false;
 
-    for arg in args {
-        if matches!(arg,NestedMeta::Meta(Meta::Path(p)) if p.is_ident("internal")) {
+    let arg_parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("internal") {
             internal = true;
         }
-    }
+        Ok(())
+    });
+    parse_macro_input!(args with arg_parser);
 
     match generate_handler(internal, input) {
         Ok(stream) => stream,
@@ -49,7 +48,7 @@ fn generate_handler(internal: bool, input: TokenStream) -> Result<TokenStream> {
     let docs = item_fn
         .attrs
         .iter()
-        .filter(|attr| attr.path.is_ident("doc"))
+        .filter(|attr| attr.path().is_ident("doc"))
         .cloned()
         .collect::<Vec<_>>();
     let ident = &item_fn.sig.ident;
@@ -60,7 +59,7 @@ fn generate_handler(internal: bool, input: TokenStream) -> Result<TokenStream> {
     };
 
     let def_struct = if !item_fn.sig.generics.params.is_empty() {
-        let members = item_fn
+        let iter = item_fn
             .sig
             .generics
             .params
@@ -71,13 +70,26 @@ fn generate_handler(internal: bool, input: TokenStream) -> Result<TokenStream> {
             })
             .enumerate()
             .map(|(idx, ty)| {
-                let ty_ident = &ty.ident;
                 let ident = format_ident!("_mark{}", idx);
-                quote! { #ident: ::std::marker::PhantomData<#ty_ident> }
+                let ty_ident = &ty.ident;
+                (ident, ty_ident)
             });
+
+        let struct_members = iter.clone().map(|(ident, ty_ident)| {
+            quote! { #ident: ::std::marker::PhantomData<#ty_ident> }
+        });
+
+        let default_members = iter.clone().map(|(ident, _ty_ident)| {
+            quote! { #ident: ::std::marker::PhantomData }
+        });
+
         quote! {
-            #[derive(Default)]
-            #vis struct #ident #type_generics { #(#members),*}
+            #vis struct #ident #type_generics { #(#struct_members),*}
+            impl #type_generics ::std::default::Default for #ident #type_generics {
+                fn default() -> Self {
+                    Self { #(#default_members),* }
+                }
+            }
         }
     } else {
         quote! { #vis struct #ident; }
@@ -101,7 +113,6 @@ fn generate_handler(internal: bool, input: TokenStream) -> Result<TokenStream> {
         #[allow(non_camel_case_types)]
         #def_struct
 
-        #[#crate_name::async_trait]
         impl #impl_generics #crate_name::Endpoint for #ident #type_generics #where_clause {
             type Output = #crate_name::Response;
 

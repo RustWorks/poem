@@ -19,7 +19,7 @@ impl<T: Type> Type for Vec<T> {
     type RawElementValueType = T::RawValueType;
 
     fn name() -> Cow<'static, str> {
-        format!("[{}]", T::name()).into()
+        format!("list_{}", T::name()).into()
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -83,7 +83,6 @@ impl<T: ParseFromParameter> ParseFromParameter for Vec<T> {
     }
 }
 
-#[poem::async_trait]
 impl<T: ParseFromMultipartField> ParseFromMultipartField for Vec<T> {
     async fn parse_from_multipart(field: Option<PoemField>) -> ParseResult<Self> {
         match field {

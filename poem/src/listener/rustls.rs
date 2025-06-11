@@ -1,20 +1,18 @@
 use std::{collections::HashMap, sync::Arc};
 
 use futures_util::{
-    stream::{BoxStream, Chain, Pending},
     Stream, StreamExt,
+    stream::{BoxStream, Chain, Pending},
 };
 use http::uri::Scheme;
 use rustls_pemfile::Item;
 use tokio::io::{Error as IoError, ErrorKind, Result as IoResult};
 use tokio_rustls::{
     rustls::{
-        server::{
-            AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, ClientHello,
-            NoClientAuth, ResolvesServerCert,
-        },
-        sign::{self, CertifiedKey},
-        Certificate, PrivateKey, RootCertStore, ServerConfig,
+        ConfigBuilder, DEFAULT_VERSIONS, RootCertStore, ServerConfig, WantsVerifier,
+        crypto::{CryptoProvider, aws_lc_rs, aws_lc_rs::sign::any_supported_type},
+        server::{ClientHello, ResolvesServerCert, WebPkiClientVerifier},
+        sign::CertifiedKey,
     },
     server::TlsStream,
 };
@@ -72,30 +70,25 @@ impl RustlsCertificate {
 impl RustlsCertificate {
     fn create_certificate_key(&self) -> IoResult<CertifiedKey> {
         let cert = rustls_pemfile::certs(&mut self.cert.as_slice())
-            .map(|mut certs| certs.drain(..).map(Certificate).collect())
+            .collect::<Result<_, _>>()
             .map_err(|_| IoError::new(ErrorKind::Other, "failed to parse tls certificates"))?;
-
-        let priv_key = {
-            loop {
-                let key = match rustls_pemfile::read_one(&mut self.key.as_slice())? {
-                    Some(Item::RSAKey(key)) => key,
-                    Some(Item::PKCS8Key(key)) => key,
-                    Some(Item::ECKey(key)) => key,
-                    None => {
-                        return Err(IoError::new(
-                            ErrorKind::Other,
-                            "failed to parse tls private keys",
-                        ))
-                    }
-                    _ => continue,
-                };
-                if !key.is_empty() {
-                    break PrivateKey(key);
+        let mut key_reader = self.key.as_slice();
+        let priv_key = loop {
+            match rustls_pemfile::read_one(&mut key_reader)? {
+                Some(Item::Pkcs1Key(key)) => break key.into(),
+                Some(Item::Pkcs8Key(key)) => break key.into(),
+                Some(Item::Sec1Key(key)) => break key.into(),
+                None => {
+                    return Err(IoError::new(
+                        ErrorKind::Other,
+                        "failed to parse tls private keys",
+                    ));
                 }
+                _ => continue,
             }
         };
 
-        let key = sign::any_supported_type(&priv_key)
+        let key = any_supported_type(&priv_key)
             .map_err(|_| IoError::new(ErrorKind::Other, "invalid private key"))?;
 
         Ok(CertifiedKey {
@@ -106,7 +99,6 @@ impl RustlsCertificate {
             } else {
                 None
             },
-            sct_list: None,
         })
     }
 }
@@ -196,7 +188,7 @@ impl RustlsConfig {
     ///
     /// let config =
     ///     RustlsConfig::new().fallback(RustlsCertificate::new().cert(cert_bytes).key(key_bytes));
-    /// let listener = TcpListener::bind("127.0.0.1:3000").rustls(config);
+    /// let listener = TcpListener::bind("0.0.0.0:3000").rustls(config);
     /// ```
     pub fn fallback(mut self, certificate: RustlsCertificate) -> Self {
         self.fallback = Some(certificate);
@@ -230,45 +222,69 @@ impl RustlsConfig {
             .map(|fallback| fallback.create_certificate_key())
             .transpose()?
             .map(Arc::new);
-        let mut certifcate_keys = HashMap::new();
+        let mut certificate_keys = HashMap::with_capacity(self.certificates.len());
 
         for (name, certificate) in &self.certificates {
-            certifcate_keys.insert(
+            certificate_keys.insert(
                 name.clone(),
                 Arc::new(certificate.create_certificate_key()?),
             );
         }
 
-        let client_auth = match &self.client_auth {
-            TlsClientAuth::Off => NoClientAuth::boxed(),
+        let builder = make_server_config_builder();
+        let builder = match &self.client_auth {
+            TlsClientAuth::Off => builder.with_no_client_auth(),
             TlsClientAuth::Optional(trust_anchor) => {
-                AllowAnyAnonymousOrAuthenticatedClient::new(read_trust_anchor(trust_anchor)?)
-                    .boxed()
+                let verifier =
+                    WebPkiClientVerifier::builder(read_trust_anchor(trust_anchor)?.into())
+                        .allow_unauthenticated()
+                        .build()
+                        .map_err(IoError::other)?;
+                builder.with_client_cert_verifier(verifier)
             }
             TlsClientAuth::Required(trust_anchor) => {
-                AllowAnyAuthenticatedClient::new(read_trust_anchor(trust_anchor)?).boxed()
+                let verifier =
+                    WebPkiClientVerifier::builder(read_trust_anchor(trust_anchor)?.into())
+                        .build()
+                        .map_err(IoError::other)?;
+                builder.with_client_cert_verifier(verifier)
             }
         };
 
-        let mut server_config = ServerConfig::builder()
-            .with_safe_defaults()
-            .with_client_cert_verifier(client_auth)
-            .with_cert_resolver(Arc::new(ResolveServerCert {
-                certifcate_keys,
-                fallback,
-            }));
+        let mut server_config = builder.with_cert_resolver(Arc::new(ResolveServerCert {
+            certificate_keys,
+            fallback,
+        }));
         server_config.alpn_protocols = vec!["h2".into(), "http/1.1".into()];
 
         Ok(server_config)
     }
 }
 
+// A port of CryptoProvider::get_default_or_install_from_crate_features while
+// always use aws_lc_rs as the default provider.
+fn make_server_config_builder() -> ConfigBuilder<ServerConfig, WantsVerifier> {
+    if CryptoProvider::get_default().is_none() {
+        let provider = aws_lc_rs::default_provider();
+        let _ = provider.install_default();
+    }
+
+    // SAFETY: `CryptoProvider::get_default()` must be non-null at this point
+    let provider = CryptoProvider::get_default().unwrap();
+
+    // SAFETY: process-level default provider is usable with the supplied versions
+    ServerConfig::builder_with_provider(provider.clone())
+        .with_protocol_versions(DEFAULT_VERSIONS)
+        .unwrap()
+}
+
 fn read_trust_anchor(mut trust_anchor: &[u8]) -> IoResult<RootCertStore> {
     let mut store = RootCertStore::empty();
-    let ders = rustls_pemfile::certs(&mut trust_anchor)?;
+    let ders = rustls_pemfile::certs(&mut trust_anchor);
     for der in ders {
+        let der = der.map_err(|err| IoError::new(ErrorKind::Other, err.to_string()))?;
         store
-            .add(&Certificate(der))
+            .add(der)
             .map_err(|err| IoError::new(ErrorKind::Other, err.to_string()))?;
     }
     Ok(store)
@@ -300,8 +316,8 @@ impl IntoTlsConfigStream<RustlsConfig> for RustlsConfig {
 /// protocol with [`rustls`](https://crates.io/crates/rustls).
 ///
 /// NOTE: You cannot create it directly and should use the
-/// [`rustls`](crate::listener::Listener::rustls) method to create it, because
-/// it needs to wrap a underlying listener.
+/// [`rustls`](Listener::rustls) method to create it, because
+/// it needs to wrap an underlying listener.
 #[cfg_attr(docsrs, doc(cfg(feature = "rustls")))]
 pub struct RustlsListener<T, S> {
     inner: T,
@@ -321,7 +337,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<T: Listener, S: IntoTlsConfigStream<RustlsConfig>> Listener for RustlsListener<T, S> {
     type Acceptor = RustlsAcceptor<T::Acceptor, BoxStream<'static, RustlsConfig>>;
 
@@ -354,7 +369,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<T, S> Acceptor for RustlsAcceptor<T, S>
 where
     S: Stream<Item = RustlsConfig> + Send + Unpin + 'static,
@@ -402,8 +416,9 @@ where
     }
 }
 
+#[derive(Debug)]
 struct ResolveServerCert {
-    certifcate_keys: HashMap<String, Arc<CertifiedKey>>,
+    certificate_keys: HashMap<String, Arc<CertifiedKey>>,
     fallback: Option<Arc<CertifiedKey>>,
 }
 
@@ -411,7 +426,7 @@ impl ResolvesServerCert for ResolveServerCert {
     fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
         client_hello
             .server_name()
-            .and_then(|name| self.certifcate_keys.get(name).map(Arc::clone))
+            .and_then(|name| self.certificate_keys.get(name).cloned())
             .or_else(|| self.fallback.clone())
     }
 }
@@ -422,7 +437,7 @@ mod tests {
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpStream,
     };
-    use tokio_rustls::rustls::{ClientConfig, ServerName};
+    use tokio_rustls::rustls::{ClientConfig, pki_types::ServerName};
 
     use super::*;
     use crate::listener::TcpListener;
@@ -441,7 +456,6 @@ mod tests {
 
         tokio::spawn(async move {
             let config = ClientConfig::builder()
-                .with_safe_defaults()
                 .with_root_certificates(
                     read_trust_anchor(include_bytes!("certs/chain1.pem")).unwrap(),
                 )

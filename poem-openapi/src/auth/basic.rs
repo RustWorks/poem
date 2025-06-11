@@ -1,11 +1,12 @@
 use poem::{
-    web::headers::{Authorization, HeaderMapExt},
     Request, Result,
+    web::headers::{Authorization, HeaderMapExt},
 };
 
 use crate::{auth::BasicAuthorization, error::AuthorizationError};
 
 /// Used to extract the username/password from the request.
+#[derive(Debug)]
 pub struct Basic {
     /// username
     pub username: String,

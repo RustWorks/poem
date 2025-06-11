@@ -1,13 +1,14 @@
 use std::ops::{Deref, DerefMut};
 
+use itertools::Either;
 use poem::{Request, RequestBody, Result};
 
 use crate::{
+    ApiExtractor, ApiExtractorType, ExtractParamOptions,
     base::UrlQuery,
     error::ParseParamError,
     registry::{MetaParamIn, MetaSchemaRef, Registry},
     types::ParseFromParameter,
-    ApiExtractor, ApiExtractorType, ExtractParamOptions,
 };
 
 /// Represents the parameters passed by the query string.
@@ -27,9 +28,8 @@ impl<T> DerefMut for Query<T> {
     }
 }
 
-#[poem::async_trait]
 impl<'a, T: ParseFromParameter> ApiExtractor<'a> for Query<T> {
-    const TYPE: ApiExtractorType = ApiExtractorType::Parameter;
+    const TYPES: &'static [ApiExtractorType] = &[ApiExtractorType::Parameter];
     const PARAM_IS_REQUIRED: bool = T::IS_REQUIRED;
 
     type ParamType = T;
@@ -56,12 +56,13 @@ impl<'a, T: ParseFromParameter> ApiExtractor<'a> for Query<T> {
         _body: &mut RequestBody,
         param_opts: ExtractParamOptions<Self::ParamType>,
     ) -> Result<Self> {
-        let mut values = request
-            .extensions()
-            .get::<UrlQuery>()
-            .unwrap()
-            .get_all(param_opts.name)
-            .peekable();
+        let url_query = request.extensions().get::<UrlQuery>().unwrap();
+        let mut values = if !param_opts.ignore_case {
+            Either::Left(url_query.get_all(param_opts.name))
+        } else {
+            Either::Right(url_query.get_all_by(|n| param_opts.name.eq_ignore_ascii_case(n)))
+        }
+        .peekable();
 
         match &param_opts.default_value {
             Some(default_value) if values.peek().is_none() => {

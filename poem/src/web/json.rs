@@ -1,11 +1,11 @@
 use std::ops::{Deref, DerefMut};
 
 use http::StatusCode;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    error::ParseJsonError, http::header, web::RequestBody, FromRequest, IntoResponse, Request,
-    Response, Result,
+    FromRequest, IntoResponse, Request, Response, Result, error::ParseJsonError, http::header,
+    web::RequestBody,
 };
 
 /// JSON extractor and response.
@@ -20,12 +20,11 @@ use crate::{
 ///
 /// ```
 /// use poem::{
-///     handler,
-///     http::{header, Method, StatusCode},
+///     Endpoint, Request, Route, handler,
+///     http::{Method, StatusCode, header},
 ///     post,
 ///     test::TestClient,
 ///     web::Json,
-///     Endpoint, Request, Route,
 /// };
 /// use serde::Deserialize;
 ///
@@ -61,7 +60,7 @@ use crate::{
 ///
 /// ```
 /// use poem::{
-///     get, handler, http::StatusCode, test::TestClient, web::Json, Endpoint, Request, Route,
+///     Endpoint, Request, Route, get, handler, http::StatusCode, test::TestClient, web::Json,
 /// };
 /// use serde::Serialize;
 ///
@@ -103,7 +102,6 @@ impl<T> DerefMut for Json<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a, T: DeserializeOwned> FromRequest<'a> for Json<T> {
     async fn from_request(req: &'a Request, body: &mut RequestBody) -> Result<Self> {
         let content_type = req
@@ -115,10 +113,20 @@ impl<'a, T: DeserializeOwned> FromRequest<'a> for Json<T> {
             return Err(ParseJsonError::InvalidContentType(content_type.into()).into());
         }
 
-        Ok(Self(
-            serde_json::from_slice(&body.take()?.into_bytes().await?)
-                .map_err(ParseJsonError::Parse)?,
-        ))
+        #[cfg(not(feature = "sonic-rs"))]
+        {
+            Ok(Self(
+                serde_json::from_slice(&body.take()?.into_bytes().await?)
+                    .map_err(ParseJsonError::Parse)?,
+            ))
+        }
+        #[cfg(feature = "sonic-rs")]
+        {
+            Ok(Self(
+                sonic_rs::from_slice(&body.take()?.into_bytes().await?)
+                    .map_err(ParseJsonError::Parse)?,
+            ))
+        }
     }
 }
 
@@ -128,17 +136,22 @@ fn is_json_content_type(content_type: &str) -> bool {
         && (content_type.subtype() == "json"
         || content_type
             .suffix()
-            .map_or(false, |v| v == "json")))
+            .is_some_and(|v| v == "json")))
 }
 
 impl<T: Serialize + Send> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
-        let data = match serde_json::to_vec(&self.0) {
+        #[cfg(not(feature = "sonic-rs"))]
+        let vec = serde_json::to_vec(&self.0);
+        #[cfg(feature = "sonic-rs")]
+        let vec = sonic_rs::to_vec(&self.0);
+
+        let data = match vec {
             Ok(data) => data,
             Err(err) => {
                 return Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(err.to_string())
+                    .body(err.to_string());
             }
         };
         Response::builder()
@@ -150,7 +163,10 @@ impl<T: Serialize + Send> IntoResponse for Json<T> {
 #[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};
-    use serde_json::json;
+    #[cfg(not(feature = "sonic-rs"))]
+    use serde_json::{json, to_string};
+    #[cfg(feature = "sonic-rs")]
+    use sonic_rs::{json, to_string};
 
     use super::*;
     use crate::{handler, test::TestClient};
@@ -190,7 +206,7 @@ mod tests {
         let cli = TestClient::new(index);
         cli.post("/")
             // .header(header::CONTENT_TYPE, "application/json")
-            .body(serde_json::to_string(&create_resource).expect("Invalid json"))
+            .body(to_string(&create_resource).expect("Invalid json"))
             .send()
             .await
             .assert_status(StatusCode::UNSUPPORTED_MEDIA_TYPE);

@@ -20,7 +20,7 @@ impl Type for Url {
     type RawElementValueType = Self;
 
     fn name() -> Cow<'static, str> {
-        "string(url)".into()
+        "string_url".into()
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -55,7 +55,6 @@ impl ParseFromParameter for Url {
     }
 }
 
-#[poem::async_trait]
 impl ParseFromMultipartField for Url {
     async fn parse_from_multipart(field: Option<Field>) -> ParseResult<Self> {
         match field {

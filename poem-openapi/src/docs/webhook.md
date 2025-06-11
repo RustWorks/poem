@@ -1,4 +1,4 @@
-Define a OpenApi webhooks.
+Define an OpenAPI webhooks.
 
 # Macro parameters
 
@@ -16,6 +16,16 @@ Define a OpenApi webhooks.
 | external_docs | Specify a external resource for extended documentation                                                               | string | Y        |
 | tag           | Operation tag                                                                                                        | Tags   | Y        |
 | operation_id  | Unique string used to identify the operation.                                                                        | string | Y        |
+
+# Doc Parameters
+
+The following attributes are parsed from the Rust documentation of the method.
+
+| Attribute | Description                      | Type   | Optional |
+|-----------|----------------------------------|--------|----------|
+| summary       | Define the summary of the operation. | string | Y        |
+| description       | Define the description of the operation. | string | Y        |
+
 
 # Operation argument parameters
 
@@ -49,9 +59,12 @@ struct Pet {
 }
 
 #[Webhook]
-trait MyWebhooks: Sync {
+trait MyWebhooks {
+    /// This is the summary of the operation
+    ///
+    /// This is the description of the operation
     #[oai(method = "post")]
-    async fn new_pet(&self, pet: Json<Pet>);
+    fn new_pet(&self, pet: Json<Pet>);
 }
 
 let api = OpenApiService::new((), "Demo", "1.0.0")

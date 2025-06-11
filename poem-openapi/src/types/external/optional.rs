@@ -19,7 +19,7 @@ impl<T: Type> Type for Option<T> {
     type RawElementValueType = T::RawElementValueType;
 
     fn name() -> Cow<'static, str> {
-        format!("optional<{}>", T::name()).into()
+        format!("optional_{}", T::name()).into()
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -83,7 +83,6 @@ impl<T: ParseFromParameter> ParseFromParameter for Option<T> {
     }
 }
 
-#[poem::async_trait]
 impl<T: ParseFromMultipartField> ParseFromMultipartField for Option<T> {
     async fn parse_from_multipart(value: Option<PoemField>) -> ParseResult<Self> {
         match value {

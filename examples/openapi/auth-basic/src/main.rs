@@ -6,7 +6,7 @@ use poem_openapi::{auth::Basic, payload::PlainText, OpenApi, OpenApiService, Sec
 /// - User: `test`
 /// - Password: `123456`
 #[derive(SecurityScheme)]
-#[oai(type = "basic")]
+#[oai(ty = "basic")]
 struct MyBasicAuthorization(Basic);
 
 struct Api;
@@ -33,7 +33,7 @@ async fn main() -> Result<(), std::io::Error> {
         OpenApiService::new(Api, "Authorization Demo", "1.0").server("http://localhost:3000/api");
     let ui = api_service.swagger_ui();
 
-    poem::Server::new(TcpListener::bind("127.0.0.1:3000"))
+    poem::Server::new(TcpListener::bind("0.0.0.0:3000"))
         .run(Route::new().nest("/api", api_service).nest("/", ui))
         .await
 }

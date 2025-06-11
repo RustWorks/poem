@@ -1,15 +1,15 @@
 use poem::{
+    Endpoint, EndpointExt, Error,
     http::{Method, StatusCode},
     test::TestClient,
     web::Data,
-    Endpoint, EndpointExt, Error,
 };
 use poem_openapi::{
+    ApiRequest, ApiResponse, Object, OpenApi, OpenApiService, ParameterStyle, Tags,
     param::{Path, Query},
     payload::{Binary, Json, Payload, PlainText},
     registry::{MetaApi, MetaExternalDocument, MetaOperation, MetaParamIn, MetaSchema, Registry},
     types::Type,
-    ApiRequest, ApiResponse, Object, OpenApi, OpenApiService, Tags,
 };
 
 #[tokio::test]
@@ -76,7 +76,7 @@ fn tag() {
 }
 
 #[tokio::test]
-async fn common_attributes() {
+async fn common_tags() {
     #[derive(Tags)]
     enum MyTags {
         UserOperations,
@@ -97,10 +97,124 @@ async fn common_attributes() {
         meta.paths[0].operations[0].tags,
         vec!["CommonOperations", "UserOperations"]
     );
+}
+
+#[tokio::test]
+async fn prefix_path() {
+    struct Api;
+
+    #[OpenApi(prefix_path = "/hello")]
+    impl Api {
+        #[oai(path = "/world", method = "get")]
+        async fn test(&self) {}
+
+        #[oai(path = "/", method = "get")]
+        async fn test1(&self) {}
+    }
+
+    let meta: MetaApi = Api::meta().remove(0);
+    assert_eq!(meta.paths[0].path, "/hello/world");
+    assert_eq!(meta.paths[1].path, "/hello");
 
     let ep = OpenApiService::new(Api, "test", "1.0");
     TestClient::new(ep)
         .get("/hello/world")
+        .send()
+        .await
+        .assert_status_is_ok();
+
+    let ep = OpenApiService::new(Api, "test", "1.0");
+    TestClient::new(ep)
+        .get("/hello")
+        .send()
+        .await
+        .assert_status_is_ok();
+
+    const PREFIX: &str = "/hello2";
+
+    struct Api2;
+
+    #[OpenApi(prefix_path = PREFIX)]
+    impl Api2 {
+        #[oai(path = "/world", method = "get")]
+        async fn test(&self) {}
+
+        #[oai(path = "/", method = "get")]
+        async fn test1(&self) {}
+    }
+
+    let meta: MetaApi = Api2::meta().remove(0);
+    assert_eq!(meta.paths[0].path, "/hello2/world");
+    assert_eq!(meta.paths[1].path, "/hello2");
+
+    let ep = OpenApiService::new(Api2, "test", "1.0");
+    TestClient::new(ep)
+        .get("/hello2/world")
+        .send()
+        .await
+        .assert_status_is_ok();
+
+    let ep = OpenApiService::new(Api2, "test", "1.0");
+    TestClient::new(ep)
+        .get("/hello2")
+        .send()
+        .await
+        .assert_status_is_ok();
+
+    struct Api3;
+
+    #[OpenApi(prefix_path = "/hello3/")]
+    impl Api3 {
+        #[oai(path = "/world", method = "get")]
+        async fn test(&self) {}
+
+        #[oai(path = "/", method = "get")]
+        async fn test1(&self) {}
+    }
+
+    let meta: MetaApi = Api3::meta().remove(0);
+    assert_eq!(meta.paths[0].path, "/hello3/world");
+    assert_eq!(meta.paths[1].path, "/hello3/");
+
+    let ep = OpenApiService::new(Api3, "test", "1.0");
+    TestClient::new(ep)
+        .get("/hello3/world")
+        .send()
+        .await
+        .assert_status_is_ok();
+
+    let ep = OpenApiService::new(Api3, "test", "1.0");
+    TestClient::new(ep)
+        .get("/hello3/")
+        .send()
+        .await
+        .assert_status_is_ok();
+
+    struct Api4;
+
+    #[OpenApi(prefix_path = "")]
+    impl Api4 {
+        #[oai(path = "/world", method = "get")]
+        async fn test(&self) {}
+
+        #[oai(path = "/", method = "get")]
+        async fn test1(&self) {}
+    }
+
+    let meta: MetaApi = Api4::meta().remove(0);
+    assert_eq!(meta.paths[0].path, "/world");
+    assert_eq!(meta.paths[1].path, "/");
+
+    let ep = OpenApiService::new(Api4, "test", "1.0");
+    TestClient::new(ep)
+        .get("/world")
+        .send()
+        .await
+        .assert_status_is_ok();
+
+    let ep = OpenApiService::new(Api4, "test", "1.0");
+    TestClient::new(ep)
+        .get("/")
         .send()
         .await
         .assert_status_is_ok();
@@ -239,13 +353,15 @@ async fn payload_request() {
 
 #[tokio::test]
 async fn response() {
+    const ALREADY_EXISTS_CODE: u16 = 409;
+
     #[derive(ApiResponse)]
     enum MyResponse {
         /// Ok
         #[oai(status = 200)]
         Ok,
         /// Already exists
-        #[oai(status = 409)]
+        #[oai(status = ALREADY_EXISTS_CODE)]
         AlreadyExists(Json<u16>),
         /// Default
         Default(StatusCode, PlainText<String>),
@@ -432,6 +548,43 @@ async fn poem_extract() {
 }
 
 #[tokio::test]
+async fn issue_948() {
+    struct Api;
+    #[OpenApi]
+    impl Api {
+        #[oai(path = "/hello/:another_param", method = "post")]
+        async fn another_param_handler(
+            &self,
+            Path(another_param): Path<String>,
+        ) -> PlainText<String> {
+            PlainText(format!("POST /hello/{another_param}"))
+        }
+
+        #[oai(path = "/hello/:param", method = "get")]
+        async fn param_handler(&self, Path(param): Path<String>) -> PlainText<String> {
+            PlainText(format!("GET /hello/{param}"))
+        }
+    }
+
+    let meta = Api::meta().remove(0);
+    assert_eq!(meta.paths[0].path, "/hello/{another_param}");
+    assert_eq!(meta.paths[0].operations[0].method, Method::POST);
+
+    assert_eq!(meta.paths[1].path, "/hello/{param}");
+    assert_eq!(meta.paths[1].operations[0].method, Method::GET);
+
+    let ep = OpenApiService::new(Api, "test", "1.0");
+    let client = TestClient::new(ep);
+    let res = client.get("/hello/something").send().await;
+    res.assert_status_is_ok();
+    res.assert_text("GET /hello/something").await;
+
+    let res = client.post("/hello/another_something").send().await;
+    res.assert_status_is_ok();
+    res.assert_text("POST /hello/another_something").await;
+}
+
+#[tokio::test]
 async fn returning_borrowed_value() {
     struct Api {
         value1: i32,
@@ -568,8 +721,8 @@ async fn extra_response_headers_on_operation() {
         #[oai(
             path = "/",
             method = "get",
-            response_header(name = "A1", type = "String", description = "abc"),
-            response_header(name = "a2", type = "i32", deprecated = true)
+            response_header(name = "A1", ty = "String", description = "abc"),
+            response_header(name = "a2", ty = "i32", deprecated = true)
         )]
         async fn test(&self) {}
     }
@@ -594,8 +747,8 @@ async fn extra_response_headers_on_api() {
     struct Api;
 
     #[OpenApi(
-        response_header(name = "A1", type = "String", description = "abc"),
-        response_header(name = "a2", type = "i32", deprecated = true)
+        response_header(name = "A1", ty = "String", description = "abc"),
+        response_header(name = "a2", ty = "i32", deprecated = true)
     )]
     impl Api {
         #[oai(path = "/", method = "get")]
@@ -626,8 +779,8 @@ async fn extra_request_headers_on_operation() {
         #[oai(
             path = "/",
             method = "get",
-            request_header(name = "A1", type = "String", description = "abc"),
-            request_header(name = "a2", type = "i32", deprecated = true)
+            request_header(name = "A1", ty = "String", description = "abc"),
+            request_header(name = "a2", ty = "i32", deprecated = true)
         )]
         async fn test(&self) {}
     }
@@ -656,8 +809,8 @@ async fn extra_request_headers_on_api() {
     struct Api;
 
     #[OpenApi(
-        request_header(name = "A1", type = "String", description = "abc"),
-        request_header(name = "a2", type = "i32", deprecated = true)
+        request_header(name = "A1", ty = "String", description = "abc"),
+        request_header(name = "a2", ty = "i32", deprecated = true)
     )]
     impl Api {
         #[oai(path = "/", method = "get")]
@@ -839,6 +992,7 @@ async fn hidden() {
 
 #[test]
 fn issue_405() {
+    #[allow(dead_code)]
     struct Api;
 
     #[OpenApi]
@@ -849,11 +1003,13 @@ fn issue_405() {
             operation_id = "hello",
             transform = "my_transformer"
         )]
+        #[allow(dead_code)]
         async fn index(&self) -> PlainText<String> {
             PlainText("hello, world!".to_string())
         }
     }
 
+    #[allow(dead_code)]
     fn my_transformer(ep: impl Endpoint) -> impl Endpoint {
         ep.map_to_response()
     }
@@ -881,4 +1037,50 @@ async fn issue_489() {
         .send()
         .await
         .assert_status(StatusCode::METHOD_NOT_ALLOWED);
+}
+
+#[tokio::test]
+async fn parameter_style_some() {
+    #[allow(dead_code)]
+    struct Api;
+
+    #[OpenApi]
+    impl Api {
+        #[oai(path = "/hello", method = "get")]
+        #[allow(dead_code)]
+        async fn index(
+            &self,
+            #[oai(style = "deep_object")] Query(input): Query<String>,
+        ) -> PlainText<String> {
+            PlainText(format!("hello, world! {input}"))
+        }
+    }
+
+    assert_eq!(
+        Api::meta()[0].paths[0].operations[0].params[0].style,
+        Some(ParameterStyle::DeepObject)
+    );
+
+    let spec = OpenApiService::new(Api {}, "test", "1.0").spec();
+    assert!(spec.contains("\"style\": \"deepObject\""));
+}
+
+#[tokio::test]
+async fn parameter_style_none() {
+    #[allow(dead_code)]
+    struct Api;
+
+    #[OpenApi]
+    impl Api {
+        #[oai(path = "/hello", method = "get")]
+        #[allow(dead_code)]
+        async fn index(&self, #[oai()] Query(input): Query<String>) -> PlainText<String> {
+            PlainText(format!("hello, world! {input}"))
+        }
+    }
+
+    assert_eq!(Api::meta()[0].paths[0].operations[0].params[0].style, None);
+
+    let spec = OpenApiService::new(Api {}, "test", "1.0").spec();
+    assert!(!spec.contains("\"style\"") && !spec.contains("\"style\": null"));
 }

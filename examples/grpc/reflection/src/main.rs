@@ -6,7 +6,6 @@ const FILE_DESCRIPTOR_SET: &[u8] = poem_grpc::include_file_descriptor_set!("hell
 
 struct GreeterService;
 
-#[poem::async_trait]
 impl Greeter for GreeterService {
     async fn say_hello(
         &self,
@@ -26,7 +25,7 @@ async fn main() -> Result<(), std::io::Error> {
     }
     tracing_subscriber::fmt::init();
 
-    Server::new(TcpListener::bind("127.0.0.1:3000"))
+    Server::new(TcpListener::bind("0.0.0.0:3000"))
         .run(
             RouteGrpc::new()
                 .add_service(

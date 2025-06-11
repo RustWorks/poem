@@ -1,10 +1,13 @@
 use std::{
     collections::HashMap,
     fmt::{self, Debug, Display},
+    future::Future,
     ops::Deref,
 };
 
-use poem::{endpoint::BoxEndpoint, http::Method, Error, FromRequest, Request, RequestBody, Result};
+use futures_util::FutureExt;
+use poem::{Error, FromRequest, Request, RequestBody, Result, endpoint::BoxEndpoint, http::Method};
+use serde::Serialize;
 
 use crate::{
     payload::Payload,
@@ -13,6 +16,28 @@ use crate::{
         MetaResponses, MetaSchemaRef, MetaWebhook, Registry,
     },
 };
+
+/// The style of the passed parameter. See https://swagger.io/docs/specification/v3_0/serialization/ for details
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ParameterStyle {
+    /// Dot-prefixed values, also known as label expansion.
+    Label,
+    /// Semicolon-prefixed values, also known as path-style expansion.
+    Matrix,
+    /// Ampersand-separated values, also known as form-style query expansion.
+    Form,
+    /// Comma-separated values
+    Simple,
+    /// Space-separated array values. Has effect only for non-exploded arrays.
+    SpaceDelimited,
+    /// Pipeline-separated array values. Has effect only for non-exploded
+    /// arrays.
+    PipeDelimited,
+    /// Bracket-nested objects, e.g.
+    /// `paramName[prop1]=value1&paramName[prop2]=value2`
+    DeepObject,
+}
 
 /// API extractor types.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -31,6 +56,7 @@ pub enum ApiExtractorType {
 }
 
 #[doc(hidden)]
+#[derive(Clone)]
 pub struct UrlQuery(pub Vec<(String, String)>);
 
 impl Deref for UrlQuery {
@@ -42,7 +68,7 @@ impl Deref for UrlQuery {
 }
 
 impl UrlQuery {
-    #[allow(missing_docs)]
+    /// Returns all values with the specified name.
     pub fn get_all<'a, 'b: 'a>(&'b self, name: &'a str) -> impl Iterator<Item = &'b String> + 'a {
         self.0
             .iter()
@@ -50,107 +76,130 @@ impl UrlQuery {
             .map(|(_, value)| value)
     }
 
-    #[allow(missing_docs)]
+    /// Returns all values uses a closure to filter the name.
+    pub fn get_all_by<'a, 'b: 'a>(
+        &'b self,
+        mut f: impl FnMut(&str) -> bool + 'a,
+    ) -> impl Iterator<Item = &'b String> + 'a {
+        self.0
+            .iter()
+            .filter(move |(n, _)| f(n))
+            .map(|(_, value)| value)
+    }
+
+    /// Returns the first value with the specified name.
     pub fn get(&self, name: &str) -> Option<&String> {
         self.get_all(name).next()
     }
 }
 
 /// Options for the parameter extractor.
+#[derive(Debug, Clone)]
 pub struct ExtractParamOptions<T> {
     /// The name of this parameter.
     pub name: &'static str,
 
+    /// Ignore the case of the parameter name when matching.
+    pub ignore_case: bool,
+
     /// The default value of this parameter.
     pub default_value: Option<fn() -> T>,
+
+    /// The example value of this parameter.
+    pub example_value: Option<fn() -> T>,
 
     /// When this is `true`, parameter values of type array or object generate
     /// separate parameters for each value of the array or key-value pair of the
     /// map.
     pub explode: bool,
+
+    /// The style of the parameter.
+    pub style: Option<ParameterStyle>,
 }
 
 impl<T> Default for ExtractParamOptions<T> {
     fn default() -> Self {
         Self {
             name: "",
+            ignore_case: false,
             default_value: None,
+            example_value: None,
             explode: true,
+            style: None,
         }
     }
 }
 
-/// Represents a OpenAPI extractor.
+/// Represents an OpenAPI extractor.
 ///
 /// # Provided Implementations
 ///
 /// - **Path&lt;T: Type>**
 ///
-///    Extract the parameters in the request path into
-/// [`Path`](crate::param::Path).
+///  Extract the parameters in the request path into
+///  [`Path`](crate::param::Path).
 ///
 /// - **Query&lt;T: Type>**
 ///
-///    Extract the parameters in the query string into
-/// [`Query`](crate::param::Query).
+///  Extract the parameters in the query string into
+///  [`Query`](crate::param::Query).
 ///
 /// - **Header&lt;T: Type>**
 ///
-///    Extract the parameters in the request header into
-/// [`Header`](crate::param::Header).
+///  Extract the parameters in the request header into
+///  [`Header`](crate::param::Header).
 ///
 /// - **Cookie&lt;T: Type>**
 ///
-///    Extract the parameters in the cookie into
-/// [`Cookie`](crate::param::Cookie).
+///  Extract the parameters in the cookie into
+///  [`Cookie`](crate::param::Cookie).
 ///
 /// - **CookiePrivate&lt;T: Type>**
 ///
-///    Extract the parameters in the private cookie into
-/// [`CookiePrivate`](crate::param::CookiePrivate).
+///  Extract the parameters in the private cookie into
+///  [`CookiePrivate`](crate::param::CookiePrivate).
 ///
 /// - **CookieSigned&lt;T: Type>**
 ///
-///    Extract the parameters in the signed cookie into
-/// [`CookieSigned`](crate::param::CookieSigned).
+///  Extract the parameters in the signed cookie into
+///  [`CookieSigned`](crate::param::CookieSigned).
 ///
 /// - **Binary&lt;T>**
 ///
-///     Extract the request body as binary into
-/// [`Binary`](crate::payload::Binary).
+///  Extract the request body as binary into
+///  [`Binary`](crate::payload::Binary).
 ///
 /// - **Json&lt;T>**
 ///
-///     Parse the request body in `JSON` format into
-/// [`Json`](crate::payload::Json).
+///  Parse the request body in `JSON` format into
+///  [`Json`](crate::payload::Json).
 ///
 /// - **PlainText&lt;T>**
 ///
-///     Extract the request body as utf8 string into
-/// [`PlainText`](crate::payload::PlainText).
+///  Extract the request body as utf8 string into
+///  [`PlainText`](crate::payload::PlainText).
 ///
 /// - **Any type derived from the [`ApiRequest`](crate::ApiRequest) macro**
 ///
-///     Extract the complex request body derived from the `ApiRequest` macro.
+///  Extract the complex request body derived from the `ApiRequest` macro.
 ///
 /// - **Any type derived from the [`Multipart`](crate::Multipart) macro**
 ///
-///     Extract the multipart object derived from the `Multipart` macro.
+///  Extract the multipart object derived from the `Multipart` macro.
 ///
 /// - **Any type derived from the [`SecurityScheme`](crate::SecurityScheme)
 ///   macro**
 ///
-///     Extract the authentication value derived from the `SecurityScheme`
-/// macro.
+///  Extract the authentication value derived from the `SecurityScheme`
+///  macro.
 ///
 /// - **T: poem::FromRequest**
 ///
-///     Use Poem's extractor.
-#[poem::async_trait]
+///  Use Poem's extractor.
 #[allow(unused_variables)]
 pub trait ApiExtractor<'a>: Sized {
     /// The type of API extractor.
-    const TYPE: ApiExtractorType;
+    const TYPES: &'static [ApiExtractorType];
 
     /// If it is `true`, it means that this parameter is required.
     const PARAM_IS_REQUIRED: bool = false;
@@ -164,9 +213,14 @@ pub trait ApiExtractor<'a>: Sized {
     /// Register related types to registry.
     fn register(registry: &mut Registry) {}
 
-    /// Returns name of security scheme if this extractor is security scheme.
-    fn security_scheme() -> Option<&'static str> {
-        None
+    /// Returns names of security scheme if this extractor is security scheme.
+    fn security_schemes() -> Vec<&'static str> {
+        vec![]
+    }
+
+    /// Returns `true` if the extractor is a security scheme with a fallback.
+    fn has_security_fallback() -> bool {
+        false
     }
 
     /// Returns the location of the parameter if this extractor is parameter.
@@ -190,16 +244,15 @@ pub trait ApiExtractor<'a>: Sized {
     }
 
     /// Parse from the HTTP request.
-    async fn from_request(
+    fn from_request(
         request: &'a Request,
         body: &mut RequestBody,
         param_opts: ExtractParamOptions<Self::ParamType>,
-    ) -> Result<Self>;
+    ) -> impl Future<Output = Result<Self>> + Send;
 }
 
-#[poem::async_trait]
 impl<'a, T: FromRequest<'a>> ApiExtractor<'a> for T {
-    const TYPE: ApiExtractorType = ApiExtractorType::PoemExtractor;
+    const TYPES: &'static [ApiExtractorType] = &[ApiExtractorType::PoemExtractor];
 
     type ParamType = ();
     type ParamRawType = ();
@@ -209,11 +262,13 @@ impl<'a, T: FromRequest<'a>> ApiExtractor<'a> for T {
         body: &mut RequestBody,
         _param_opts: ExtractParamOptions<Self::ParamType>,
     ) -> Result<Self> {
-        T::from_request(request, body).await
+        // FIXME: remove the unnecessary boxed
+        // https://github.com/rust-lang/rust/issues/100013
+        T::from_request(request, body).boxed().await
     }
 }
 
-/// Represents a OpenAPI response content object.
+/// Represents an OpenAPI response content object.
 pub trait ResponseContent {
     /// Returns the media types in this content.
     fn media_types() -> Vec<MetaMediaType>;
@@ -236,42 +291,42 @@ impl<T: Payload> ResponseContent for T {
     }
 }
 
-/// Represents a OpenAPI responses object.
+/// Represents an OpenAPI responses object.
 ///
 /// # Provided Implementations
 ///
 /// - **Binary&lt;T: Type>**
 ///
-///     A binary response with content type `application/octet-stream`.
+///  A binary response with content type `application/octet-stream`.
 ///
 /// - **Json&lt;T: Type>**
 ///
-///     A JSON response with content type `application/json`.
+///  A JSON response with content type `application/json`.
 ///
 /// - **PlainText&lt;T: Type>**
 ///
-///     A utf8 string response with content type `text/plain`.
+///  A utf8 string response with content type `text/plain`.
 ///
 /// - **Attachment&lt;T: Type>**
 ///
-///     A file download response, the content type is
-/// `application/octet-stream`.
+///  A file download response, the content type is
+///  `application/octet-stream`.
 ///
 /// - **Response&lt;T: Type>**
 ///
-///     A response type use it to modify the status code and HTTP headers.
+///  A response type use it to modify the status code and HTTP headers.
 ///
 /// - **()**
 ///
-///     It means that this API does not have any response body.
+///  It means that this API does not have any response body.
 ///
 /// - **poem::Result&lt;T: ApiResponse>**
 ///
-///     It means that an error may occur in this API.
+///  It means that an error may occur in this API.
 ///
 /// - **Any type derived from the [`ApiResponse`](crate::ApiResponse) macro**
 ///
-///     A complex response  derived from the `ApiResponse` macro.
+///  A complex response  derived from the `ApiResponse` macro.
 pub trait ApiResponse: Sized {
     /// If true, it means that the response object has a custom bad request
     /// handler.
@@ -296,6 +351,7 @@ impl ApiResponse for () {
             responses: vec![MetaResponse {
                 description: "",
                 status: Some(200),
+                status_range: None,
                 content: vec![],
                 headers: vec![],
             }],
@@ -349,6 +405,7 @@ where
             responses: vec![MetaResponse {
                 description: "A websocket response",
                 status: Some(101),
+                status_range: None,
                 content: vec![],
                 headers: vec![],
             }],
@@ -358,7 +415,7 @@ where
     fn register(_registry: &mut Registry) {}
 }
 
-/// Represents a OpenAPI tags.
+/// Represents an OpenAPI tags.
 pub trait Tags {
     /// Register this tag type to registry.
     fn register(&self, registry: &mut Registry);
@@ -387,7 +444,7 @@ impl Display for OperationId {
     }
 }
 
-/// Represents a OpenAPI object.
+/// Represents an OpenAPI object.
 pub trait OpenApi: Sized {
     /// Gets metadata of this API object.
     fn meta() -> Vec<MetaApi>;

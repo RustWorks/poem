@@ -5,7 +5,7 @@ use serde::Serialize;
 use tokio_metrics::{TaskMetrics, TaskMonitor};
 
 use crate::{
-    endpoint::make_sync, Endpoint, IntoResponse, Middleware, Request, Response, Result, RouteMethod,
+    Endpoint, IntoResponse, Middleware, Request, Response, Result, RouteMethod, endpoint::make_sync,
 };
 
 /// Middleware for metrics with [`tokio-metrics`](https://crates.io/crates/tokio-metrics) crate.
@@ -36,12 +36,21 @@ impl TokioMetrics {
     }
 
     /// Create an endpoint for exporting metrics.
-    pub fn exporter(&self) -> impl Endpoint {
+    pub fn exporter(&self) -> impl Endpoint + 'static {
         let metrics = self.metrics.clone();
         RouteMethod::new().get(make_sync(move |_| {
-            serde_json::to_string(&*metrics.lock())
-                .unwrap()
-                .with_content_type("application/json")
+            #[cfg(not(feature = "sonic-rs"))]
+            {
+                serde_json::to_string(&*metrics.lock())
+                    .unwrap()
+                    .with_content_type("application/json")
+            }
+            #[cfg(feature = "sonic-rs")]
+            {
+                sonic_rs::to_string(&*metrics.lock())
+                    .unwrap()
+                    .with_content_type("application/json")
+            }
         }))
     }
 }
@@ -71,13 +80,12 @@ impl<E: Endpoint> Middleware<E> for TokioMetrics {
     }
 }
 
-/// Endpoint for TokioMetrics middleware.
+/// Endpoint for the TokioMetrics middleware.
 pub struct TokioMetricsEndpoint<E> {
     inner: E,
     monitor: TaskMonitor,
 }
 
-#[async_trait::async_trait]
 impl<E: Endpoint> Endpoint for TokioMetricsEndpoint<E> {
     type Output = Response;
 

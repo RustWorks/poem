@@ -1,23 +1,24 @@
 use std::{future::Future, marker::PhantomData, sync::Arc};
 
+use futures_util::{FutureExt, future::BoxFuture};
+
 use super::{
     After, AndThen, Around, Before, CatchAllError, CatchError, InspectAllError, InspectError, Map,
     MapToResponse, ToResponse,
 };
 use crate::{
+    Error, IntoResponse, Middleware, Request, Response, Result,
     error::IntoResult,
     middleware::{AddData, AddDataEndpoint},
-    Error, IntoResponse, Middleware, Request, Response, Result,
 };
 
 /// An HTTP request handler.
-#[async_trait::async_trait]
 pub trait Endpoint: Send + Sync {
     /// Represents the response of the endpoint.
     type Output: IntoResponse;
 
     /// Get the response to the request.
-    async fn call(&self, req: Request) -> Result<Self::Output>;
+    fn call(&self, req: Request) -> impl Future<Output = Result<Self::Output>> + Send;
 
     /// Get the response to the request and return a [`Response`].
     ///
@@ -28,8 +29,8 @@ pub trait Endpoint: Send + Sync {
     ///
     /// ```
     /// use poem::{
-    ///     error::NotFoundError, handler, http::StatusCode, test::TestClient, Endpoint, Request,
-    ///     Result,
+    ///     Endpoint, Request, Result, error::NotFoundError, handler, http::StatusCode,
+    ///     test::TestClient,
     /// };
     ///
     /// #[handler]
@@ -45,11 +46,13 @@ pub trait Endpoint: Send + Sync {
     ///     .assert_status(StatusCode::NOT_FOUND);
     /// # });
     /// ```
-    async fn get_response(&self, req: Request) -> Response {
-        self.call(req)
-            .await
-            .map(IntoResponse::into_response)
-            .unwrap_or_else(|err| err.into_response())
+    fn get_response(&self, req: Request) -> impl Future<Output = Response> + Send {
+        async move {
+            self.call(req)
+                .await
+                .map(IntoResponse::into_response)
+                .unwrap_or_else(|err| err.into_response())
+        }
     }
 }
 
@@ -58,7 +61,6 @@ struct SyncFnEndpoint<T, F> {
     f: F,
 }
 
-#[async_trait::async_trait]
 impl<F, T, R> Endpoint for SyncFnEndpoint<T, F>
 where
     F: Fn(Request) -> R + Send + Sync,
@@ -77,7 +79,6 @@ struct AsyncFnEndpoint<T, F> {
     f: F,
 }
 
-#[async_trait::async_trait]
 impl<F, Fut, T, R> Endpoint for AsyncFnEndpoint<T, F>
 where
     F: Fn(Request) -> Fut + Sync + Send,
@@ -92,13 +93,15 @@ where
     }
 }
 
-/// Combines two different endpoints for [`Endpoint::with_if`].
+/// The enum `EitherEndpoint` with variants `Left` and `Right` is a general
+/// purpose sum type with two cases.
 pub enum EitherEndpoint<A, B> {
+    /// A endpoint of type `A`
     A(A),
+    /// A endpoint of type `B`
     B(B),
 }
 
-#[async_trait::async_trait]
 impl<A, B> Endpoint for EitherEndpoint<A, B>
 where
     A: Endpoint,
@@ -121,7 +124,7 @@ where
 /// # Example
 ///
 /// ```
-/// use poem::{endpoint::make_sync, http::Method, test::TestClient, Endpoint, Request};
+/// use poem::{Endpoint, Request, endpoint::make_sync, http::Method, test::TestClient};
 ///
 /// let ep = make_sync(|req| req.method().to_string());
 /// let cli = TestClient::new(ep);
@@ -151,7 +154,7 @@ where
 /// # Example
 ///
 /// ```
-/// use poem::{endpoint::make, http::Method, test::TestClient, Endpoint, Request};
+/// use poem::{Endpoint, Request, endpoint::make, http::Method, test::TestClient};
 ///
 /// let ep = make(|req| async move { req.method().to_string() });
 /// let app = TestClient::new(ep);
@@ -175,7 +178,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<T: Endpoint + ?Sized> Endpoint for &T {
     type Output = T::Output;
 
@@ -184,7 +186,6 @@ impl<T: Endpoint + ?Sized> Endpoint for &T {
     }
 }
 
-#[async_trait::async_trait]
 impl<T: Endpoint + ?Sized> Endpoint for Box<T> {
     type Output = T::Output;
 
@@ -193,7 +194,6 @@ impl<T: Endpoint + ?Sized> Endpoint for Box<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<T: Endpoint + ?Sized> Endpoint for Arc<T> {
     type Output = T::Output;
 
@@ -202,9 +202,45 @@ impl<T: Endpoint + ?Sized> Endpoint for Arc<T> {
     }
 }
 
+/// A `endpoint` that can be dynamically dispatched.
+pub trait DynEndpoint: Send + Sync {
+    /// Represents the response of the endpoint.
+    type Output: IntoResponse;
+
+    /// Get the response to the request.
+    fn call(&self, req: Request) -> BoxFuture<Result<Self::Output>>;
+}
+
+/// A [`Endpoint`] wrapper used to implement [`DynEndpoint`].
+pub struct ToDynEndpoint<E>(pub E);
+
+impl<E> DynEndpoint for ToDynEndpoint<E>
+where
+    E: Endpoint,
+{
+    type Output = E::Output;
+
+    #[inline]
+    fn call(&self, req: Request) -> BoxFuture<Result<Self::Output>> {
+        self.0.call(req).boxed()
+    }
+}
+
+impl<T> Endpoint for dyn DynEndpoint<Output = T> + '_
+where
+    T: IntoResponse,
+{
+    type Output = T;
+
+    #[inline]
+    async fn call(&self, req: Request) -> Result<Self::Output> {
+        DynEndpoint::call(self, req).await
+    }
+}
+
 /// An owned dynamically typed `Endpoint` for use in cases where you can’t
 /// statically type your result or need to add some indirection.
-pub type BoxEndpoint<'a, T = Response> = Box<dyn Endpoint<Output = T> + 'a>;
+pub type BoxEndpoint<'a, T = Response> = Box<dyn DynEndpoint<Output = T> + 'a>;
 
 /// Extension trait for [`Endpoint`].
 pub trait EndpointExt: IntoEndpoint {
@@ -213,7 +249,7 @@ pub trait EndpointExt: IntoEndpoint {
     where
         Self: Sized + 'a,
     {
-        Box::new(self.into_endpoint())
+        Box::new(ToDynEndpoint(self.into_endpoint()))
     }
 
     /// Use middleware to transform this endpoint.
@@ -222,8 +258,8 @@ pub trait EndpointExt: IntoEndpoint {
     ///
     /// ```
     /// use poem::{
-    ///     get, handler, http::StatusCode, middleware::AddData, test::TestClient, web::Data, Endpoint,
-    ///     EndpointExt, Request, Route,
+    ///     Endpoint, EndpointExt, Request, Route, get, handler, http::StatusCode, middleware::AddData,
+    ///     test::TestClient, web::Data,
     /// };
     ///
     /// #[handler]
@@ -254,12 +290,11 @@ pub trait EndpointExt: IntoEndpoint {
     ///
     /// ```
     /// use poem::{
-    ///     get, handler,
+    ///     Endpoint, EndpointExt, Request, Route, get, handler,
     ///     http::{StatusCode, Uri},
     ///     middleware::AddData,
     ///     test::TestClient,
     ///     web::Data,
-    ///     Endpoint, EndpointExt, Request, Route,
     /// };
     ///
     /// #[handler]
@@ -303,7 +338,7 @@ pub trait EndpointExt: IntoEndpoint {
     ///
     /// ```
     /// use poem::{
-    ///     handler, http::StatusCode, test::TestClient, web::Data, Endpoint, EndpointExt, Request,
+    ///     Endpoint, EndpointExt, Request, handler, http::StatusCode, test::TestClient, web::Data,
     /// };
     ///
     /// #[handler]
@@ -346,7 +381,7 @@ pub trait EndpointExt: IntoEndpoint {
     ///
     /// ```
     /// use poem::{
-    ///     handler, http::StatusCode, test::TestClient, Endpoint, EndpointExt, Error, Request, Result,
+    ///     Endpoint, EndpointExt, Error, Request, Result, handler, http::StatusCode, test::TestClient,
     /// };
     ///
     /// #[handler]
@@ -380,7 +415,7 @@ pub trait EndpointExt: IntoEndpoint {
     /// # Example
     ///
     /// ```
-    /// use poem::{handler, http::StatusCode, Endpoint, EndpointExt, Error, Request, Result};
+    /// use poem::{Endpoint, EndpointExt, Error, Request, Result, handler, http::StatusCode};
     ///
     /// #[handler]
     /// async fn index() -> &'static str {
@@ -417,9 +452,8 @@ pub trait EndpointExt: IntoEndpoint {
     ///
     /// ```
     /// use poem::{
-    ///     handler,
+    ///     Endpoint, EndpointExt, Error, Request, Result, handler,
     ///     http::{HeaderMap, HeaderValue, StatusCode},
-    ///     Endpoint, EndpointExt, Error, Request, Result,
     /// };
     ///
     /// #[handler]
@@ -463,7 +497,7 @@ pub trait EndpointExt: IntoEndpoint {
     ///
     /// ```
     /// use poem::{
-    ///     endpoint::make, http::StatusCode, Endpoint, EndpointExt, Error, Request, Response, Result,
+    ///     Endpoint, EndpointExt, Error, Request, Response, Result, endpoint::make, http::StatusCode,
     /// };
     ///
     /// let ep1 = make(|_| async { "hello" }).map_to_response();
@@ -496,7 +530,7 @@ pub trait EndpointExt: IntoEndpoint {
     ///
     /// ```
     /// use poem::{
-    ///     endpoint::make, http::StatusCode, Endpoint, EndpointExt, Error, Request, Response, Result,
+    ///     Endpoint, EndpointExt, Error, Request, Response, Result, endpoint::make, http::StatusCode,
     /// };
     ///
     /// let ep1 = make(|_| async { "hello" }).to_response();
@@ -524,7 +558,7 @@ pub trait EndpointExt: IntoEndpoint {
     ///
     /// ```
     /// use poem::{
-    ///     endpoint::make, http::StatusCode, Endpoint, EndpointExt, Error, Request, Response, Result,
+    ///     Endpoint, EndpointExt, Error, Request, Response, Result, endpoint::make, http::StatusCode,
     /// };
     ///
     /// let ep = make(|_| async { "hello" }).map(|value| async move { format!("{}, world!", value) });
@@ -553,7 +587,7 @@ pub trait EndpointExt: IntoEndpoint {
     ///
     /// ```
     /// use poem::{
-    ///     endpoint::make, http::StatusCode, Endpoint, EndpointExt, Error, Request, Response, Result,
+    ///     Endpoint, EndpointExt, Error, Request, Response, Result, endpoint::make, http::StatusCode,
     /// };
     ///
     /// let ep1 = make(|_| async { "hello" })
@@ -588,8 +622,8 @@ pub trait EndpointExt: IntoEndpoint {
     /// ```
     /// use http::Uri;
     /// use poem::{
-    ///     handler, http::StatusCode, web::Json, Endpoint, EndpointExt, Error, IntoResponse, Request,
-    ///     Response, Route,
+    ///     Endpoint, EndpointExt, Error, IntoResponse, Request, Response, Route, handler,
+    ///     http::StatusCode, web::Json,
     /// };
     /// use serde::Serialize;
     ///
@@ -640,8 +674,8 @@ pub trait EndpointExt: IntoEndpoint {
     /// ```
     /// use http::Uri;
     /// use poem::{
-    ///     error::NotFoundError, handler, http::StatusCode, Endpoint, EndpointExt, IntoResponse,
-    ///     Request, Response, Route,
+    ///     Endpoint, EndpointExt, IntoResponse, Request, Response, Route, error::NotFoundError,
+    ///     handler, http::StatusCode,
     /// };
     ///
     /// #[handler]
@@ -682,7 +716,7 @@ pub trait EndpointExt: IntoEndpoint {
     /// # Example
     ///
     /// ```
-    /// use poem::{handler, EndpointExt, Route};
+    /// use poem::{EndpointExt, Route, handler};
     ///
     /// #[handler]
     /// fn index() {}
@@ -704,7 +738,7 @@ pub trait EndpointExt: IntoEndpoint {
     /// # Example
     ///
     /// ```
-    /// use poem::{error::NotFoundError, handler, EndpointExt, Route};
+    /// use poem::{EndpointExt, Route, error::NotFoundError, handler};
     ///
     /// #[handler]
     /// fn index() {}
@@ -749,13 +783,13 @@ mod test {
     use http::{HeaderValue, Uri};
 
     use crate::{
+        Endpoint, EndpointExt, Error, IntoEndpoint, Request, Route,
         endpoint::{make, make_sync},
         get, handler,
         http::{Method, StatusCode},
         middleware::SetHeader,
         test::TestClient,
         web::Data,
-        Endpoint, EndpointExt, Error, IntoEndpoint, Request, Route,
     };
 
     #[tokio::test]

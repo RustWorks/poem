@@ -20,7 +20,7 @@ impl Type for Regex {
     type RawElementValueType = Self;
 
     fn name() -> Cow<'static, str> {
-        "string(regex)".into()
+        "string_regex".into()
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -55,7 +55,6 @@ impl ParseFromParameter for Regex {
     }
 }
 
-#[poem::async_trait]
 impl ParseFromMultipartField for Regex {
     async fn parse_from_multipart(field: Option<Field>) -> ParseResult<Self> {
         match field {

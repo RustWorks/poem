@@ -1,14 +1,14 @@
 use darling::{
+    FromDeriveInput, FromField,
     ast::Data,
     util::{Ignored, SpannedValue},
-    FromDeriveInput, FromField,
 };
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::{ext::IdentExt, Attribute, DeriveInput, Error, Generics, Path, Type};
+use syn::{Attribute, DeriveInput, Error, Generics, Path, Type, ext::IdentExt};
 
 use crate::{
-    common_args::{apply_rename_rule_field, DefaultValue, ExternalDocument, RenameRule},
+    common_args::{DefaultValue, ExternalDocument, RenameRule, apply_rename_rule_field},
     error::GeneratorResult,
     utils::{create_object_name, get_crate_name, get_description, optional_literal},
     validators::Validators,
@@ -31,6 +31,10 @@ struct ObjectField {
     #[darling(default)]
     write_only: bool,
     #[darling(default)]
+    deprecated: bool,
+    #[darling(default)]
+    nullable: bool,
+    #[darling(default)]
     read_only: bool,
     #[darling(default)]
     validator: Option<Validators>,
@@ -42,6 +46,10 @@ struct ObjectField {
     skip_serializing_if_is_empty: bool,
     #[darling(default)]
     skip_serializing_if: Option<Path>,
+    #[darling(default)]
+    serialize_with: Option<Path>,
+    #[darling(default)]
+    deserialize_with: Option<Path>,
 }
 
 #[derive(FromDeriveInput)]
@@ -64,6 +72,8 @@ struct ObjectArgs {
     read_only_all: bool,
     #[darling(default)]
     write_only_all: bool,
+    #[darling(default)]
+    nullable_all: bool,
     #[darling(default)]
     deny_unknown_fields: bool,
     #[darling(default)]
@@ -100,6 +110,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
     let mut register_types = Vec::new();
     let mut fields = Vec::new();
     let mut meta_fields = Vec::new();
+    let mut additional_properties = quote! { ::std::option::Option::None };
     let mut required_fields = Vec::new();
     let object_name = create_object_name(&crate_name, &oai_typename, &args.generics);
 
@@ -111,11 +122,13 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
         let field_ty = &field.ty;
         let read_only = args.read_only_all || field.read_only;
         let write_only = args.write_only_all || field.write_only;
+        let nullable = args.nullable_all || field.nullable;
         let skip_serializing_if_is_none =
             field.skip_serializing_if_is_none || args.skip_serializing_if_is_none;
         let skip_serializing_if_is_empty =
             field.skip_serializing_if_is_empty || args.skip_serializing_if_is_empty;
         let skip_serializing_if = &field.skip_serializing_if;
+        let deprecated = field.deprecated;
 
         if field.skip {
             deserialize_fields.push(quote! {
@@ -144,32 +157,47 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
 
         fields.push(field_ident);
 
+        let create_default_value = match (&field.default, &args.default) {
+            // field default
+            (Some(default_value), _) => Some(match default_value {
+                DefaultValue::Default => quote!(<#field_ty as ::std::default::Default>::default()),
+                DefaultValue::Function(func_name) => quote!(#func_name()),
+            }),
+            // object default
+            (_, Some(default_value)) => Some(match default_value {
+                DefaultValue::Default => {
+                    quote!(<Self as ::std::default::Default>::default().#field_ident)
+                }
+                DefaultValue::Function(func_name) => quote!({
+                    let default_obj: Self = #func_name();
+                    default_obj.#field_ident
+                }),
+            }),
+            // no default
+            _ => None,
+        };
+
         if read_only {
+            let create_default_value = create_default_value
+                .clone()
+                .unwrap_or_else(|| quote! { ::std::default::Default::default() });
             deserialize_fields.push(quote! {
                 #[allow(non_snake_case)]
                 let #field_ident: #field_ty = {
                     if obj.contains_key(#field_name) {
                         return Err(#crate_name::types::ParseError::custom(format!("properties `{}` is read only.", #field_name)));
                     }
-                    ::std::default::Default::default()
+                    #create_default_value
                 };
             });
         } else if !*field.flatten {
-            match (&field.default, &args.default) {
-                // field default
-                (Some(default_value), _) => {
-                    let default_value = match default_value {
-                        DefaultValue::Default => {
-                            quote!(<#field_ty as ::std::default::Default>::default())
-                        }
-                        DefaultValue::Function(func_name) => quote!(#func_name()),
-                    };
-
+            match &create_default_value {
+                Some(create_default_value) => {
                     deserialize_fields.push(quote! {
                         #[allow(non_snake_case)]
                         let #field_ident: #field_ty = {
                             match obj.remove(#field_name) {
-                                ::std::option::Option::Some(#crate_name::__private::serde_json::Value::Null) | ::std::option::Option::None => #default_value,
+                                ::std::option::Option::Some(#crate_name::__private::serde_json::Value::Null) | ::std::option::Option::None => #create_default_value,
                                 value => {
                                     let value = #crate_name::types::ParseFromJSON::parse_from_json(value).map_err(#crate_name::types::ParseError::propagate)?;
                                     #validators_checker
@@ -179,45 +207,23 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
                         };
                     });
                 }
-                // object default
-                (_, Some(default_value)) => {
-                    let default_value = match default_value {
-                        DefaultValue::Default => {
-                            quote!(<Self as ::std::default::Default>::default().#field_ident)
-                        }
-                        DefaultValue::Function(func_name) => quote!({
-                            let default_obj: Self = #func_name();
-                            default_obj.#field_ident
-                        }),
+                None => {
+                    let deserialize_function = match field.deserialize_with {
+                        Some(ref function) => quote! { #function },
+                        None => quote! { #crate_name::types::ParseFromJSON::parse_from_json },
                     };
 
                     deserialize_fields.push(quote! {
                         #[allow(non_snake_case)]
                         let #field_ident: #field_ty = {
-                            match obj.remove(#field_name) {
-                                ::std::option::Option::Some(#crate_name::__private::serde_json::Value::Null) | ::std::option::Option::None => #default_value,
-                                value => {
-                                    let value = #crate_name::types::ParseFromJSON::parse_from_json(value).map_err(#crate_name::types::ParseError::propagate)?;
-                                    #validators_checker
-                                    value
-                                }
-                            }
-                        };
-                    });
-                }
-                // no default
-                _ => {
-                    deserialize_fields.push(quote! {
-                        #[allow(non_snake_case)]
-                        let #field_ident: #field_ty = {
-                            let value = #crate_name::types::ParseFromJSON::parse_from_json(obj.remove(#field_name))
+                            let value = #deserialize_function(obj.remove(#field_name))
                                 .map_err(#crate_name::types::ParseError::propagate)?;
                             #validators_checker
                             value
                         };
-                    });
+                    })
                 }
-            };
+            }
         } else {
             if args.deny_unknown_fields {
                 return Err(Error::new(
@@ -253,9 +259,14 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
                     quote!(true)
                 };
 
+                let serialize_function = match field.serialize_with {
+                    Some(ref function) => quote! { #function },
+                    None => quote! { #crate_name::types::ToJSON::to_json },
+                };
+
                 serialize_fields.push(quote! {
                     if #check_is_none && #check_is_empty && #check_if {
-                        if let ::std::option::Option::Some(value) = #crate_name::types::ToJSON::to_json(&self.#field_ident) {
+                        if let ::std::option::Option::Some(value) = #serialize_function(&self.#field_ident) {
                             object.insert(::std::string::ToString::to_string(#field_name), value);
                         }
                     }
@@ -269,40 +280,24 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
             });
         }
 
-        let field_meta_default = match (&field.default, &args.default) {
-            (Some(default_value), _) => match default_value {
-                DefaultValue::Default => {
-                    quote!(#crate_name::types::ToJSON::to_json(&<#field_ty as ::std::default::Default>::default()))
-                }
-                DefaultValue::Function(func_name) => {
-                    quote!(#crate_name::types::ToJSON::to_json(&#func_name()))
-                }
-            },
-            (_, Some(default_value)) => match default_value {
-                DefaultValue::Default => {
-                    quote!(#crate_name::types::ToJSON::to_json(&<Self as ::std::default::Default>::default().#field_ident))
-                }
-                DefaultValue::Function(func_name) => {
-                    quote!(#crate_name::types::ToJSON::to_json(&{
-                        let default_object: Self = #func_name();
-                        default_object.#field_ident
-                    }))
-                }
-            },
-            (None, None) => quote!(::std::option::Option::None),
+        let field_meta_default = match &create_default_value {
+            Some(create_default_value) if !read_only => {
+                quote!(#crate_name::types::ToJSON::to_json(&#create_default_value))
+            }
+            _ => quote!(::std::option::Option::None),
         };
 
+        register_types.push(quote!(<#field_ty as #crate_name::types::Type>::register(registry);));
         if !*field.flatten {
-            register_types
-                .push(quote!(<#field_ty as #crate_name::types::Type>::register(registry);));
-
             meta_fields.push(quote! {{
                 let original_schema = <#field_ty as #crate_name::types::Type>::schema_ref();
                 let patch_schema = {
                     let mut schema = #crate_name::registry::MetaSchema::ANY;
                     schema.default = #field_meta_default;
+                    schema.nullable = #nullable;
                     schema.read_only = #read_only;
                     schema.write_only = #write_only;
+                    schema.deprecated = #deprecated;
 
                     if let ::std::option::Option::Some(field_description) = #field_description {
                         schema.description = ::std::option::Option::Some(field_description);
@@ -324,6 +319,9 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
             meta_fields.push(quote! {
                 fields.extend(registry.create_fake_schema::<#field_ty>().properties);
             });
+            additional_properties = quote! {
+                registry.create_fake_schema::<#field_ty>().additional_properties
+            };
             required_fields.push(quote! {
                 fields.extend(registry.create_fake_schema::<#field_ty>().required);
             });
@@ -341,6 +339,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
     };
     let meta = quote! {
         #crate_name::registry::MetaSchema {
+            title: ::std::option::Option::Some(#object_name),
             description: #description,
             external_docs: #external_docs,
             required: {
@@ -354,6 +353,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
                 #(#meta_fields)*
                 fields
             },
+            additional_properties: #additional_properties,
             deprecated: #deprecated,
             ..#crate_name::registry::MetaSchema::new("object")
         }
@@ -425,6 +425,8 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
                 ::std::boxed::Box::new(::std::iter::IntoIterator::into_iter(self.as_raw_value()))
             }
         }
+
+        impl #impl_generics #crate_name::types::IsObjectType for #ident #ty_generics #where_clause {}
 
         impl #impl_generics #crate_name::types::ParseFromJSON for #ident #ty_generics #where_clause {
             fn parse_from_json(value: ::std::option::Option<#crate_name::__private::serde_json::Value>) -> ::std::result::Result<Self, #crate_name::types::ParseError<Self>> {

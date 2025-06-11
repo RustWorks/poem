@@ -1,7 +1,7 @@
 use darling::{
+    FromDeriveInput, FromVariant,
     ast::{Data, Fields},
     util::{Ignored, SpannedValue},
-    FromDeriveInput, FromVariant,
 };
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
@@ -44,7 +44,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
                 ident,
                 "ResponseContent can only be applied to an enum.",
             )
-            .into())
+            .into());
         }
     };
 
@@ -115,14 +115,13 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
             _ => {
                 return Err(
                     Error::new_spanned(&variant.ident, "Incorrect request definition.").into(),
-                )
+                );
             }
         }
     }
 
     let expanded = {
         quote! {
-            #[#crate_name::__private::poem::async_trait]
             impl #impl_generics #crate_name::ResponseContent for #ident #ty_generics #where_clause {
                 fn media_types() -> Vec<#crate_name::registry::MetaMediaType> {
                     ::std::vec![#(#content),*]

@@ -1,11 +1,11 @@
 use std::ops::{Deref, DerefMut};
 
 use http::StatusCode;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    error::ParseYamlError, http::header, web::RequestBody, FromRequest, IntoResponse, Request,
-    Response, Result,
+    FromRequest, IntoResponse, Request, Response, Result, error::ParseYamlError, http::header,
+    web::RequestBody,
 };
 
 /// JSON extractor and response.
@@ -20,12 +20,11 @@ use crate::{
 ///
 /// ```
 /// use poem::{
-///     handler,
-///     http::{header, Method, StatusCode},
+///     Endpoint, Request, Route, handler,
+///     http::{Method, StatusCode, header},
 ///     post,
 ///     test::TestClient,
 ///     web::Yaml,
-///     Endpoint, Request, Route,
 /// };
 /// use serde::Deserialize;
 ///
@@ -61,7 +60,7 @@ use crate::{
 ///
 /// ```
 /// use poem::{
-///     get, handler, http::StatusCode, test::TestClient, web::Yaml, Endpoint, Request, Route,
+///     Endpoint, Request, Route, get, handler, http::StatusCode, test::TestClient, web::Yaml,
 /// };
 /// use serde::Serialize;
 ///
@@ -107,7 +106,6 @@ impl<T> DerefMut for Yaml<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a, T: DeserializeOwned> FromRequest<'a> for Yaml<T> {
     async fn from_request(req: &'a Request, body: &mut RequestBody) -> Result<Self> {
         let content_type = req
@@ -132,7 +130,7 @@ fn is_yaml_content_type(content_type: &str) -> bool {
         && (content_type.subtype() == "yaml"
         || content_type
             .suffix()
-            .map_or(false, |v| v == "yaml")))
+            .is_some_and(|v| v == "yaml")))
 }
 
 impl<T: Serialize + Send> IntoResponse for Yaml<T> {
@@ -142,7 +140,7 @@ impl<T: Serialize + Send> IntoResponse for Yaml<T> {
             Err(err) => {
                 return Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(err.to_string())
+                    .body(err.to_string());
             }
         };
         Response::builder()

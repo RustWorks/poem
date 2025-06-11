@@ -1,6 +1,6 @@
 use poem::{
-    async_trait, get, handler, listener::TcpListener, Endpoint, EndpointExt, IntoResponse,
-    Middleware, Request, Response, Result, Route, Server,
+    get, handler, listener::TcpListener, Endpoint, EndpointExt, IntoResponse, Middleware, Request,
+    Response, Result, Route, Server,
 };
 
 struct Log;
@@ -15,7 +15,6 @@ impl<E: Endpoint> Middleware<E> for Log {
 
 struct LogImpl<E>(E);
 
-#[async_trait]
 impl<E: Endpoint> Endpoint for LogImpl<E> {
     type Output = Response;
 
@@ -50,7 +49,7 @@ async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::fmt::init();
 
     let app = Route::new().at("/", get(index)).with(Log);
-    Server::new(TcpListener::bind("127.0.0.1:3000"))
+    Server::new(TcpListener::bind("0.0.0.0:3000"))
         .run(app)
         .await
 }

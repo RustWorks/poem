@@ -1,4 +1,6 @@
-use crate::{status::Status, streaming::Streaming, Request, Response};
+use std::future::Future;
+
+use crate::{Request, Response, status::Status, streaming::Streaming};
 
 /// Represent a GRPC service
 pub trait Service {
@@ -6,39 +8,38 @@ pub trait Service {
     const NAME: &'static str;
 }
 
-#[poem::async_trait]
 pub trait UnaryService<R> {
     type Response;
 
-    async fn call(&self, request: Request<R>) -> Result<Response<Self::Response>, Status>;
+    fn call(
+        &self,
+        request: Request<R>,
+    ) -> impl Future<Output = Result<Response<Self::Response>, Status>> + Send;
 }
 
-#[poem::async_trait]
 pub trait ClientStreamingService<R> {
     type Response;
 
-    async fn call(
+    fn call(
         &self,
         request: Request<Streaming<R>>,
-    ) -> Result<Response<Self::Response>, Status>;
+    ) -> impl Future<Output = Result<Response<Self::Response>, Status>> + Send;
 }
 
-#[poem::async_trait]
 pub trait ServerStreamingService<R> {
     type Response;
 
-    async fn call(
+    fn call(
         &self,
         request: Request<R>,
-    ) -> Result<Response<Streaming<Self::Response>>, Status>;
+    ) -> impl Future<Output = Result<Response<Streaming<Self::Response>>, Status>> + Send;
 }
 
-#[poem::async_trait]
 pub trait BidirectionalStreamingService<R> {
     type Response;
 
-    async fn call(
+    fn call(
         &self,
         request: Request<Streaming<R>>,
-    ) -> Result<Response<Streaming<Self::Response>>, Status>;
+    ) -> impl Future<Output = Result<Response<Streaming<Self::Response>>, Status>> + Send;
 }

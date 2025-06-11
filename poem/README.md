@@ -20,9 +20,9 @@
     <img src="https://img.shields.io/badge/unsafe-forbidden-success.svg?style=flat-square"
       alt="Unsafe Rust forbidden" />
   </a>
-  <a href="https://blog.rust-lang.org/2022/09/22/Rust-1.64.0.html">
-    <img src="https://img.shields.io/badge/rustc-1.64.0+-ab6000.svg"
-      alt="rustc 1.64.0+" />
+  <a>
+    <img src="https://img.shields.io/badge/rustc-1.85.0+-ab6000.svg"
+      alt="rustc 1.85.0+" />
   </a>
   <a href="https://discord.gg/qWWNxwasb7">
     <img src="https://img.shields.io/discord/932986985604333638.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2" />
@@ -77,7 +77,8 @@ which are disabled by default:
 | embed         | Integrate with [`rust-embed`](https://crates.io/crates/rust-embed) crate.                 |
 | xml           | Integrate with [`quick-xml`](https://crates.io/crates/quick-xml) crate.                   |
 | yaml           | Integrate with [`serde-yaml`](https://crates.io/crates/serde-yaml) crate.                   |
-
+|requestid      |Associates an unique ID with each incoming request                                 |
+|sonic-rs       | Uses [`sonic-rs`](https://github.com/cloudwego/sonic-rs) instead of `serde_json`. Pls, checkout `sonic-rs` requirements to properly enable `sonic-rs` capabilities          |
 ## Safety
 
 This crate uses `#![forbid(unsafe_code)]` to ensure everything is implemented in 100% Safe Rust.
@@ -95,7 +96,7 @@ fn hello(Path(name): Path<String>) -> String {
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
     let app = Route::new().at("/hello/:name", get(hello));
-    Server::new(TcpListener::bind("127.0.0.1:3000"))
+    Server::new(TcpListener::bind("0.0.0.0:3000"))
       .run(app)
       .await
 }
@@ -107,7 +108,7 @@ More examples can be found [here][examples].
 
 ## MSRV
 
-The minimum supported Rust version for this crate is `1.64.0`.
+The minimum supported Rust version for this crate is `1.85.0`.
 
 ## Contributing
 

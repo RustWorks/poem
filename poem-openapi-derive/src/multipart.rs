@@ -1,13 +1,13 @@
 use std::str::FromStr;
 
-use darling::{ast::Data, util::Ignored, FromDeriveInput, FromField};
+use darling::{FromDeriveInput, FromField, ast::Data, util::Ignored};
 use mime as _;
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::{ext::IdentExt, Attribute, DeriveInput, Error, Generics, Type};
+use syn::{Attribute, DeriveInput, Error, Generics, Type, ext::IdentExt};
 
 use crate::{
-    common_args::{apply_rename_rule_field, DefaultValue, RenameRule},
+    common_args::{DefaultValue, RenameRule, apply_rename_rule_field},
     error::GeneratorResult,
     utils::{get_crate_name, get_description, optional_literal},
     validators::Validators,
@@ -56,7 +56,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
         _ => {
             return Err(
                 Error::new_spanned(ident, "Multipart can only be applied to an struct.").into(),
-            )
+            );
         }
     };
 
@@ -242,7 +242,6 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
             }
         }
 
-        #[#crate_name::__private::poem::async_trait]
         impl #impl_generics #crate_name::payload::ParsePayload for #ident #ty_generics #where_clause {
             const IS_REQUIRED: bool = true;
 
@@ -259,9 +258,8 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
             }
         }
 
-        #[#crate_name::__private::poem::async_trait]
         impl #extractor_impl_generics #crate_name::ApiExtractor<'__request> for #ident #ty_generics #where_clause {
-            const TYPE: #crate_name::ApiExtractorType = #crate_name::ApiExtractorType::RequestObject;
+            const TYPES: &'static [#crate_name::ApiExtractorType] = &[#crate_name::ApiExtractorType::RequestObject];
 
             type ParamType = ();
             type ParamRawType = ();

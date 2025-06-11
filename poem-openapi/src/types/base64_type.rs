@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use base64::engine::{general_purpose::STANDARD, Engine};
+use base64::engine::{Engine, general_purpose::STANDARD};
 use bytes::Bytes;
 use serde_json::Value;
 
@@ -38,7 +38,7 @@ impl<T: AsRef<[u8]> + Send + Sync> Type for Base64<T> {
     type RawElementValueType = Self;
 
     fn name() -> Cow<'static, str> {
-        "string(bytes)".into()
+        "string_bytes".into()
     }
 
     fn schema_ref() -> MetaSchemaRef {

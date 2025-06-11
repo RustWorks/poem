@@ -1,12 +1,12 @@
 use std::fmt::Write;
 
-use poem::{http::header::CONTENT_DISPOSITION, Body, IntoResponse, Response};
+use poem::{Body, IntoResponse, Response, http::header::CONTENT_DISPOSITION};
 
 use crate::{
+    ApiResponse,
     payload::{Binary, Payload},
     registry::{MetaHeader, MetaMediaType, MetaResponse, MetaResponses, MetaSchemaRef, Registry},
     types::Type,
-    ApiResponse,
 };
 
 const CONTENT_DISPOSITION_DESC: &str = "Indicate if the content is expected to be displayed inline in the browser, that is, as a Web page or as part of a Web page, or as an attachment, that is downloaded and saved locally.";
@@ -104,6 +104,7 @@ impl<T: Into<Body> + Send> ApiResponse for Attachment<T> {
             responses: vec![MetaResponse {
                 description: "",
                 status: Some(200),
+                status_range: None,
                 content: vec![MetaMediaType {
                     content_type: Self::CONTENT_TYPE,
                     schema: Self::schema_ref(),

@@ -5,9 +5,9 @@ use smallvec::SmallVec;
 use unic_langid::LanguageIdentifier;
 
 use crate::{
+    FromRequest, Request, RequestBody, Result,
     error::I18NError,
     i18n::{I18NArgs, I18NBundle, I18NResources},
-    FromRequest, Request, RequestBody, Result,
 };
 
 type LanguageArray = SmallVec<[LanguageIdentifier; 8]>;
@@ -19,11 +19,10 @@ type LanguageArray = SmallVec<[LanguageIdentifier; 8]>;
 ///
 /// ```
 /// use poem::{
-///     handler,
+///     Endpoint, EndpointExt, Request, Route, handler,
 ///     http::header,
 ///     i18n::{I18NResources, Locale},
 ///     test::TestClient,
-///     Endpoint, EndpointExt, Request, Route,
 /// };
 ///
 /// let resources = I18NResources::builder()
@@ -84,7 +83,6 @@ impl Locale {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for Locale {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         let resources = req

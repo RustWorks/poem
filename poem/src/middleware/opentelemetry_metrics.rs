@@ -1,13 +1,12 @@
 use std::time::Instant;
 
 use libopentelemetry::{
-    global,
-    metrics::{Counter, Histogram, Unit},
-    Context, Key,
+    Key, KeyValue, global,
+    metrics::{Counter, Histogram},
 };
 use opentelemetry_semantic_conventions::trace;
 
-use crate::{route::PathPattern, Endpoint, IntoResponse, Middleware, Request, Response, Result};
+use crate::{Endpoint, IntoResponse, Middleware, Request, Response, Result, route::PathPattern};
 
 /// Middleware for metrics with OpenTelemetry.
 #[cfg_attr(docsrs, doc(cfg(feature = "opentelemetry")))]
@@ -31,18 +30,18 @@ impl OpenTelemetryMetrics {
             request_count: meter
                 .u64_counter("poem_requests_count")
                 .with_description("total request count (since start of service)")
-                .init(),
+                .build(),
             error_count: meter
                 .u64_counter("poem_errors_count")
                 .with_description("failed request count (since start of service)")
-                .init(),
+                .build(),
             duration: meter
                 .f64_histogram("poem_request_duration_ms")
-                .with_unit(Unit::new("milliseconds"))
+                .with_unit("milliseconds")
                 .with_description(
                     "request duration histogram (in milliseconds, since start of service)",
                 )
-                .init(),
+                .build(),
         }
     }
 }
@@ -60,7 +59,7 @@ impl<E: Endpoint> Middleware<E> for OpenTelemetryMetrics {
     }
 }
 
-/// Endpoint for OpenTelemetryMetrics middleware.
+/// Endpoint for the OpenTelemetryMetrics middleware.
 #[cfg_attr(docsrs, doc(cfg(feature = "opentelemetry")))]
 pub struct OpenTelemetryMetricsEndpoint<E> {
     request_count: Counter<u64>,
@@ -69,16 +68,19 @@ pub struct OpenTelemetryMetricsEndpoint<E> {
     inner: E,
 }
 
-#[async_trait::async_trait]
 impl<E: Endpoint> Endpoint for OpenTelemetryMetricsEndpoint<E> {
     type Output = Response;
 
     async fn call(&self, req: Request) -> Result<Self::Output> {
-        let cx = Context::new();
-
         let mut labels = Vec::with_capacity(3);
-        labels.push(trace::HTTP_METHOD.string(req.method().to_string()));
-        labels.push(trace::HTTP_URL.string(req.original_uri().to_string()));
+        labels.push(KeyValue::new(
+            trace::HTTP_REQUEST_METHOD,
+            req.method().to_string(),
+        ));
+        labels.push(KeyValue::new(
+            trace::URL_FULL,
+            req.original_uri().to_string(),
+        ));
 
         let s = Instant::now();
         let res = self.inner.call(req).await.map(IntoResponse::into_response);
@@ -88,26 +90,32 @@ impl<E: Endpoint> Endpoint for OpenTelemetryMetricsEndpoint<E> {
             Ok(resp) => {
                 if let Some(path_pattern) = resp.data::<PathPattern>() {
                     const HTTP_PATH_PATTERN: Key = Key::from_static_str("http.path_pattern");
-                    labels.push(HTTP_PATH_PATTERN.string(path_pattern.0.to_string()));
+                    labels.push(KeyValue::new(HTTP_PATH_PATTERN, path_pattern.0.to_string()));
                 }
 
-                labels.push(trace::HTTP_STATUS_CODE.i64(resp.status().as_u16() as i64));
+                labels.push(KeyValue::new(
+                    trace::HTTP_RESPONSE_STATUS_CODE,
+                    resp.status().as_u16() as i64,
+                ));
             }
             Err(err) => {
                 if let Some(path_pattern) = err.data::<PathPattern>() {
                     const HTTP_PATH_PATTERN: Key = Key::from_static_str("http.path_pattern");
-                    labels.push(HTTP_PATH_PATTERN.string(path_pattern.0.to_string()));
+                    labels.push(KeyValue::new(HTTP_PATH_PATTERN, path_pattern.0.to_string()));
                 }
 
-                labels.push(trace::HTTP_STATUS_CODE.i64(err.status().as_u16() as i64));
-                self.error_count.add(&cx, 1, &labels);
-                labels.push(trace::EXCEPTION_MESSAGE.string(err.to_string()));
+                labels.push(KeyValue::new(
+                    trace::HTTP_RESPONSE_STATUS_CODE,
+                    err.status().as_u16() as i64,
+                ));
+                self.error_count.add(1, &labels);
+                labels.push(KeyValue::new(trace::EXCEPTION_MESSAGE, err.to_string()));
             }
         }
 
-        self.request_count.add(&cx, 1, &labels);
+        self.request_count.add(1, &labels);
         self.duration
-            .record(&cx, elapsed.as_secs_f64() * 1000.0, &labels);
+            .record(elapsed.as_secs_f64() * 1000.0, &labels);
 
         res
     }

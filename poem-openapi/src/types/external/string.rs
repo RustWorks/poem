@@ -59,7 +59,6 @@ impl ParseFromParameter for String {
     }
 }
 
-#[poem::async_trait]
 impl ParseFromMultipartField for String {
     async fn parse_from_multipart(field: Option<Field>) -> ParseResult<Self> {
         match field {
@@ -77,14 +76,11 @@ impl ToJSON for String {
 
 impl ToHeader for String {
     fn to_header(&self) -> Option<HeaderValue> {
-        match HeaderValue::from_str(self) {
-            Ok(value) => Some(value),
-            Err(_) => None,
-        }
+        HeaderValue::from_str(self).ok()
     }
 }
 
-impl<'a> Type for &'a str {
+impl Type for &str {
     const IS_REQUIRED: bool = true;
 
     type RawValueType = Self;
@@ -110,7 +106,7 @@ impl<'a> Type for &'a str {
     }
 }
 
-impl<'a> ToJSON for &'a str {
+impl ToJSON for &str {
     fn to_json(&self) -> Option<Value> {
         Some(Value::String(self.to_string()))
     }

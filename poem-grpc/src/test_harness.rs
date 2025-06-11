@@ -1,4 +1,4 @@
-#[allow(private_in_public, unreachable_pub)]
+#[allow(unreachable_pub)]
 mod proto {
     include!(concat!(env!("OUT_DIR"), "/test_harness.rs"));
 }
@@ -10,7 +10,6 @@ use crate::{Request, Response, Status, Streaming};
 
 pub(crate) struct TestHarnessService;
 
-#[poem::async_trait]
 impl TestHarness for TestHarnessService {
     async fn unary(&self, req: Request<UnaryRequest>) -> Result<Response<ValueResponse>, Status> {
         Ok(Response::new(ValueResponse {

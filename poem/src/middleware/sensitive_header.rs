@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use http::{header::HeaderName, HeaderMap};
+use http::{HeaderMap, header::HeaderName};
 
 use crate::{Endpoint, IntoResponse, Middleware, Request, Response, Result};
 
@@ -12,7 +12,7 @@ enum AppliedTo {
     Both,
 }
 
-/// Middleware for mark headers value represents sensitive information.
+/// Middleware to mark that a headers' value represents sensitive information.
 ///
 /// Sensitive data could represent passwords or other data that should not be
 /// stored on disk or in memory. By marking header values as sensitive,
@@ -84,14 +84,13 @@ impl<E: Endpoint> Middleware<E> for SensitiveHeader {
     }
 }
 
-/// Endpoint for SensitiveHeader middleware.
+/// Endpoint for the SensitiveHeader middleware.
 pub struct SensitiveHeaderEndpoint<E> {
     inner: E,
     headers: HashSet<HeaderName>,
     applied_to: AppliedTo,
 }
 
-#[async_trait::async_trait]
 impl<E: Endpoint> Endpoint for SensitiveHeaderEndpoint<E> {
     type Output = Response;
 
@@ -123,9 +122,8 @@ fn set_sensitive(headers: &mut HeaderMap, names: &HashSet<HeaderName>) {
 mod tests {
     use super::*;
     use crate::{
-        handler,
+        EndpointExt, handler,
         test::{TestClient, TestRequestBuilder},
-        EndpointExt,
     };
 
     fn create_middleware() -> SensitiveHeader {

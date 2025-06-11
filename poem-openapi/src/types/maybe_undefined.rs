@@ -235,7 +235,7 @@ impl<T> MaybeUndefined<T> {
     {
         match self {
             MaybeUndefined::Value(y) => matches!(x, Some(v) if v == y),
-            MaybeUndefined::Null => matches!(x, None),
+            MaybeUndefined::Null => x.is_none(),
             MaybeUndefined::Undefined => false,
         }
     }
@@ -316,7 +316,7 @@ impl<T: Type> Type for MaybeUndefined<T> {
     type RawElementValueType = T::RawElementValueType;
 
     fn name() -> Cow<'static, str> {
-        format!("optional<{}>", T::name()).into()
+        format!("optional_{}", T::name()).into()
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -384,7 +384,6 @@ impl<T: ParseFromParameter> ParseFromParameter for MaybeUndefined<T> {
     }
 }
 
-#[poem::async_trait]
 impl<T: ParseFromMultipartField> ParseFromMultipartField for MaybeUndefined<T> {
     async fn parse_from_multipart(value: Option<PoemField>) -> ParseResult<Self> {
         match value {

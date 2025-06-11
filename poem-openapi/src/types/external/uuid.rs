@@ -20,7 +20,7 @@ impl Type for Uuid {
     type RawElementValueType = Self;
 
     fn name() -> Cow<'static, str> {
-        "string(uuid)".into()
+        "string_uuid".into()
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -55,7 +55,6 @@ impl ParseFromParameter for Uuid {
     }
 }
 
-#[poem::async_trait]
 impl ParseFromMultipartField for Uuid {
     async fn parse_from_multipart(field: Option<Field>) -> ParseResult<Self> {
         match field {

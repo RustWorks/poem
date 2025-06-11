@@ -1,14 +1,14 @@
 use darling::{
+    FromDeriveInput, FromVariant,
     ast::{Data, Fields},
     util::Ignored,
-    FromDeriveInput, FromVariant,
 };
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::{ext::IdentExt, Attribute, DeriveInput, Error, Path};
+use syn::{Attribute, DeriveInput, Error, Path, ext::IdentExt};
 
 use crate::{
-    common_args::{apply_rename_rule_variant, ExternalDocument, RenameRule},
+    common_args::{ExternalDocument, RenameRule, apply_rename_rule_variant},
     error::GeneratorResult,
     utils::{get_crate_name, get_description, optional_literal},
 };
@@ -192,7 +192,6 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
             }
         }
 
-        #[#crate_name::__private::poem::async_trait]
         impl #crate_name::types::ParseFromMultipartField for #ident {
             async fn parse_from_multipart(field: ::std::option::Option<#crate_name::__private::poem::web::Field>) -> #crate_name::types::ParseResult<Self> {
                 use poem_openapi::types::ParseFromParameter;

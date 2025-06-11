@@ -2,26 +2,28 @@ use std::str::FromStr;
 
 use opentelemetry::{
     global,
-    sdk::{propagation::TraceContextPropagator, trace::Tracer},
     trace::{FutureExt, TraceContextExt, Tracer as _},
     Context, KeyValue,
 };
 use opentelemetry_http::HeaderInjector;
+use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::SdkTracerProvider};
 use reqwest::{Client, Method, Url};
 
-fn init_tracer() -> Tracer {
+fn init_tracer() -> SdkTracerProvider {
     global::set_text_map_propagator(TraceContextPropagator::new());
-    opentelemetry_jaeger::new_collector_pipeline()
-        .with_service_name("poem")
-        .with_endpoint("http://localhost:14268/api/traces")
-        .with_hyper()
-        .install_batch(opentelemetry::runtime::Tokio)
-        .unwrap()
+    SdkTracerProvider::builder()
+        .with_batch_exporter(
+            opentelemetry_otlp::SpanExporter::builder()
+                .with_tonic()
+                .build()
+                .expect("Trace exporter should initialize."),
+        )
+        .build()
 }
 
 #[tokio::main]
 async fn main() {
-    let _tracer = init_tracer();
+    let tracer = init_tracer();
     let client = Client::new();
     let span = global::tracer("example-opentelemetry/client").start("request/server1");
     let cx = Context::current_with_span(span);
@@ -54,5 +56,5 @@ async fn main() {
     .with_context(cx)
     .await;
 
-    global::shutdown_tracer_provider();
+    tracer.shutdown().expect("Always shutdown tracer");
 }

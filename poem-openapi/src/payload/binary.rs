@@ -4,9 +4,9 @@ use bytes::Bytes;
 use poem::{Body, FromRequest, IntoResponse, Request, RequestBody, Response, Result};
 
 use crate::{
+    ApiResponse,
     payload::{ParsePayload, Payload},
     registry::{MetaMediaType, MetaResponse, MetaResponses, MetaSchema, MetaSchemaRef, Registry},
-    ApiResponse,
 };
 
 /// A binary payload.
@@ -15,14 +15,14 @@ use crate::{
 ///
 /// ```rust
 /// use poem::{
+///     Body, IntoEndpoint, Request, Result,
 ///     error::BadRequest,
 ///     http::{Method, StatusCode, Uri},
 ///     test::TestClient,
-///     Body, IntoEndpoint, Request, Result,
 /// };
 /// use poem_openapi::{
-///     payload::{Binary, Json},
 ///     OpenApi, OpenApiService,
+///     payload::{Binary, Json},
 /// };
 /// use tokio::io::AsyncReadExt;
 ///
@@ -87,12 +87,8 @@ impl<T> DerefMut for Binary<T> {
 impl<T: Send> Payload for Binary<T> {
     const CONTENT_TYPE: &'static str = "application/octet-stream";
 
-    fn check_content_type(content_type: &str) -> bool {
-        matches!(content_type.parse::<mime::Mime>(), Ok(content_type) if content_type.type_() == "application"
-                && (content_type.subtype() == "octet-stream"
-                || content_type
-                    .suffix()
-                    .map_or(false, |v| v == "octet-stream")))
+    fn check_content_type(_content_type: &str) -> bool {
+        true
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -103,7 +99,6 @@ impl<T: Send> Payload for Binary<T> {
     }
 }
 
-#[poem::async_trait]
 impl ParsePayload for Binary<Vec<u8>> {
     const IS_REQUIRED: bool = true;
 
@@ -112,7 +107,6 @@ impl ParsePayload for Binary<Vec<u8>> {
     }
 }
 
-#[poem::async_trait]
 impl ParsePayload for Binary<Bytes> {
     const IS_REQUIRED: bool = true;
 
@@ -121,7 +115,6 @@ impl ParsePayload for Binary<Bytes> {
     }
 }
 
-#[poem::async_trait]
 impl ParsePayload for Binary<Body> {
     const IS_REQUIRED: bool = true;
 
@@ -144,6 +137,7 @@ impl<T: Into<Body> + Send> ApiResponse for Binary<T> {
             responses: vec![MetaResponse {
                 description: "",
                 status: Some(200),
+                status_range: None,
                 content: vec![MetaMediaType {
                     content_type: Self::CONTENT_TYPE,
                     schema: Self::schema_ref(),

@@ -36,11 +36,12 @@ mod typed_header;
 #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
 pub mod websocket;
 
-use std::{convert::Infallible, fmt::Debug};
+use std::{convert::Infallible, fmt::Debug, future::Future};
 
 #[cfg(feature = "compression")]
 pub use async_compression::Level as CompressionLevel;
 use bytes::Bytes;
+use futures_util::FutureExt;
 use http::header;
 
 #[cfg(feature = "compression")]
@@ -74,8 +75,8 @@ use crate::{
     body::Body,
     error::{ReadBodyError, Result},
     http::{
-        header::{HeaderMap, HeaderName},
         HeaderValue, Method, StatusCode, Uri, Version,
+        header::{HeaderMap, HeaderName},
     },
     request::Request,
     response::Response,
@@ -116,8 +117,7 @@ impl RequestBody {
 ///
 /// - **Option&lt;T>**
 ///
-///    Extracts `T` from the incoming request, returns [`None`] if it
-/// fails.
+///    Extracts `T` from the incoming request, returns [`None`] if it fails.
 ///
 /// - **&Request**
 ///
@@ -173,98 +173,97 @@ impl RequestBody {
 ///
 /// - **Json&lt;T>**
 ///
-///    Extracts the [`Json`] from the incoming request.
+///   Extracts the [`Json`] from the incoming request.
 ///
-///    _This extractor will take over the requested body, so you should avoid
-/// using multiple extractors of this type in one handler._
+///   _This extractor will take over the requested body, so you should avoid
+///   using multiple extractors of this type in one handler._
 ///
 /// - **Xml&lt;T>**
 ///
-///    Extracts the [`Xml`] from the incoming request.
+///   Extracts the [`Xml`] from the incoming request.
 ///
-///    _This extractor will take over the requested body, so you should avoid
-/// using multiple extractors of this type in one handler._
+///   _This extractor will take over the requested body, so you should avoid
+///   using multiple extractors of this type in one handler._
 ///
 /// - **TempFile**
 ///
-///    Extracts the [`TempFile`] from the incoming request.
+///   Extracts the [`TempFile`] from the incoming request.
 ///
-///    _This extractor will take over the requested body, so you should avoid
-/// using multiple extractors of this type in one handler._
+///   _This extractor will take over the requested body, so you should avoid
+///   using multiple extractors of this type in one handler._
 ///
 /// - **Multipart**
 ///
-///    Extracts the [`Multipart`] from the incoming request.
+///   Extracts the [`Multipart`] from the incoming request.
 ///
-///    _This extractor will take over the requested body, so you should avoid
-/// using multiple extractors of this type in one handler._
+///   _This extractor will take over the requested body, so you should avoid
+///   using multiple extractors of this type in one handler._
 ///
 /// - **&CookieJar**
 ///
-///    Extracts the [`CookieJar`](cookie::CookieJar) from the incoming request.
+///   Extracts the [`CookieJar`](cookie::CookieJar) from the incoming request.
 ///
-///    _Requires `CookieJarManager` middleware._
+///   _Requires `CookieJarManager` middleware._
 ///
 /// - **&Session**
 ///
-///    Extracts the [`Session`](crate::session::Session) from the incoming
-/// request.
+///   Extracts the [`Session`](crate::session::Session) from the incoming
+///   request.
 ///
-///    _Requires `CookieSession` or `RedisSession` middleware._
+///   _Requires `CookieSession` or `RedisSession` middleware._
 ///
 /// - **Body**
 ///
-///    Extracts the [`Body`] from the incoming request.
+///   Extracts the [`Body`] from the incoming request.
 ///
-///    _This extractor will take over the requested body, so you should avoid
-/// using multiple extractors of this type in one handler._
+///   _This extractor will take over the requested body, so you should avoid
+///   using multiple extractors of this type in one handler._
 ///
 /// - **String**
 ///
-///    Extracts the body from the incoming request and parse it into utf8
-/// [`String`].
+///   Extracts the body from the incoming request and parse it into utf8
+///   [`String`].
 ///
-///    _This extractor will take over the requested body, so you should avoid
-/// using multiple extractors of this type in one handler._
+///   _This extractor will take over the requested body, so you should avoid
+///   using multiple extractors of this type in one handler._
 ///
 /// - **Vec&lt;u8>**
 ///
-///    Extracts the body from the incoming request and collect it into
-/// [`Vec<u8>`].
+///   Extracts the body from the incoming request and collect it into
+///   [`Vec<u8>`].
 ///
-///    _This extractor will take over the requested body, so you should avoid
-/// using multiple extractors of this type in one handler._
+///   _This extractor will take over the requested body, so you should avoid
+///   using multiple extractors of this type in one handler._
 ///
 /// - **Bytes**
 ///
-///    Extracts the body from the incoming request and collect it into
-/// [`Bytes`].
+///   Extracts the body from the incoming request and collect it into
+///   [`Bytes`].
 ///
-///    _This extractor will take over the requested body, so you should avoid
-/// using multiple extractors of this type in one handler._
+///   _This extractor will take over the requested body, so you should avoid
+///   using multiple extractors of this type in one handler._
 ///
 /// - **WebSocket**
 ///
-///    Ready to accept a websocket [`WebSocket`](websocket::WebSocket)
-/// connection.
+///   Ready to accept a websocket [`WebSocket`](websocket::WebSocket)
+///   connection.
 ///
 /// - **Locale**
 ///
-///    Extracts the [`Locale`](crate::i18n::Locale) from the incoming
-/// request.
+///   Extracts the [`Locale`](crate::i18n::Locale) from the incoming request.
 ///
 /// - **StaticFileRequest**
 ///
-///     Ready to accept a static file request
-/// [`StaticFileRequest`](static_file::StaticFileRequest).
+///   Ready to accept a static file request
+///   [`StaticFileRequest`](static_file::StaticFileRequest).
 ///
 /// - **Accept**
 ///
-///     Extracts the `Accept` header from the incoming request.
+///   Extracts the `Accept` header from the incoming request.
 ///
 /// - **PathPattern**
 ///
-///     Extracts the matched path pattern from the incoming request.
+///   Extracts the matched path pattern from the incoming request.
 ///
 /// # Create your own extractor
 ///
@@ -275,13 +274,12 @@ impl RequestBody {
 /// use std::fmt::{self, Display, Formatter};
 ///
 /// use poem::{
-///     get, handler, http::StatusCode, test::TestClient, Endpoint, Error, FromRequest, Request,
-///     RequestBody, Result, Route,
+///     Endpoint, Error, FromRequest, Request, RequestBody, Result, Route, get, handler,
+///     http::StatusCode, test::TestClient,
 /// };
 ///
 /// struct Token(String);
 ///
-/// #[poem::async_trait]
 /// impl<'a> FromRequest<'a> for Token {
 ///     async fn from_request(req: &'a Request, body: &mut RequestBody) -> Result<Self> {
 ///         let token = req
@@ -309,10 +307,12 @@ impl RequestBody {
 ///     .assert_status_is_ok();
 /// # });
 /// ```
-#[async_trait::async_trait]
 pub trait FromRequest<'a>: Sized {
     /// Extract from request head and body.
-    async fn from_request(req: &'a Request, body: &mut RequestBody) -> Result<Self>;
+    fn from_request(
+        req: &'a Request,
+        body: &mut RequestBody,
+    ) -> impl Future<Output = Result<Self>> + Send;
 
     /// Extract from request head.
     ///
@@ -323,8 +323,14 @@ pub trait FromRequest<'a>: Sized {
     /// request head, using this method would be more convenient.
     /// `String`,`Vec<u8>` they extract the body of the request, using this
     /// method will cause `ReadBodyError` error.
-    async fn from_request_without_body(req: &'a Request) -> Result<Self> {
-        Self::from_request(req, &mut Default::default()).await
+    fn from_request_without_body(req: &'a Request) -> impl Future<Output = Result<Self>> + Send {
+        async move {
+            // FIXME: remove the unnecessary boxed
+            // https://github.com/rust-lang/rust/issues/100013
+            Self::from_request(req, &mut Default::default())
+                .boxed()
+                .await
+        }
     }
 }
 
@@ -334,89 +340,91 @@ pub trait FromRequest<'a>: Sized {
 ///
 /// - **()**
 ///
-///    Sets the status to `OK` with an empty body.
+///   Sets the status to `OK` with an empty body.
 ///
 /// - **&'static str**
 ///
-///    Sets the status to `OK` and the `Content-Type` to `text/plain`. The
-/// string is used as the body of the response.
+///   Sets the status to `OK` and the `Content-Type` to `text/plain`. The
+///   string is used as the body of the response.
 ///
 /// - **String**
 ///
-///    Sets the status to `OK` and the `Content-Type` to `text/plain`. The
-/// string is used as the body of the response.
+///   Sets the status to `OK` and the `Content-Type` to `text/plain`. The
+///   string is used as the body of the response.
 ///
 /// - **&'static [u8]**
 ///
-///    Sets the status to `OK` and the `Content-Type` to
-/// `application/octet-stream`. The slice is used as the body of the response.
+///   Sets the status to `OK` and the `Content-Type` to
+///   `application/octet-stream`. The slice is used as the body of the
+///   response.
 ///
 /// - **Html&lt;T>**
 ///
-///    Sets the status to `OK` and the `Content-Type` to `text/html`. `T` is
-/// used as the body of the response.
+///   Sets the status to `OK` and the `Content-Type` to `text/html`. `T` is
+///   used as the body of the response.
 ///
 /// - **Json&lt;T>**
 ///
-///    Sets the status to `OK` and the `Content-Type` to `application/json`. Use
-/// [`serde_json`](https://crates.io/crates/serde_json) to serialize `T` into a json string.
+///   Sets the status to `OK` and the `Content-Type` to `application/json`. Use
+///   [`serde_json`](https://crates.io/crates/serde_json) to serialize `T` into a json string.
 ///
 ///
 /// - **Xml&lt;T>**
 ///
-///    Sets the status to `OK` and the `Content-Type` to `application/xml`. Use
-/// [`quick-xml`](https://crates.io/crates/quick-xml) to serialize `T` into a xml string.
+///   Sets the status to `OK` and the `Content-Type` to `application/xml`. Use
+///   [`quick-xml`](https://crates.io/crates/quick-xml) to serialize `T` into a xml string.
 ///
 /// - **Bytes**
 ///
-///    Sets the status to `OK` and the `Content-Type` to
-/// `application/octet-stream`. The bytes is used as the body of the response.
+///   Sets the status to `OK` and the `Content-Type` to
+///   `application/octet-stream`. The bytes is used as the body of the
+///   response.
 ///
 /// - **Vec&lt;u8>**
 ///
-///    Sets the status to `OK` and the `Content-Type` to
-/// `application/octet-stream`. The vector’s data is used as the body of the
-/// response.
+///   Sets the status to `OK` and the `Content-Type` to
+///   `application/octet-stream`. The vector’s data is used as the body of the
+///   response.
 ///
 /// - **Body**
 ///
-///     Sets the status to `OK` and use the specified body.
+///   Sets the status to `OK` and use the specified body.
 ///
 /// - **StatusCode**
 ///
-///    Sets the status to the specified status code [`StatusCode`] with an empty
-/// body.
+///   Sets the status to the specified status code [`StatusCode`] with an empty
+///   body.
 ///
 /// - **(StatusCode, T)**
 ///
-///    Convert `T` to response and set the specified status code [`StatusCode`].
+///   Convert `T` to response and set the specified status code [`StatusCode`].
 ///
 /// - **(StatusCode, HeaderMap, T)**
 ///
-///    Convert `T` to response and set the specified status code [`StatusCode`],
-/// and then merge the specified [`HeaderMap`].
+///   Convert `T` to response and set the specified status code [`StatusCode`],
+///   and then merge the specified [`HeaderMap`].
 ///
 /// - **Response**
 ///
-///    The implementation for [`Response`] always returns itself.
+///   The implementation for [`Response`] always returns itself.
 ///
 /// - **Compress&lt;T>**
 ///
-///    Call `T::into_response` to get the response, then compress the response
-/// body with the specified algorithm, and set the correct `Content-Encoding`
-/// header.
+///   Call `T::into_response` to get the response, then compress the response
+///   body with the specified algorithm, and set the correct `Content-Encoding`
+///   header.
 ///
 /// - **SSE**
 ///
-///     Sets the status to `OK` and the `Content-Type` to `text/event-stream`
-/// with an event stream body. Use the [`SSE::new`](sse::SSE::new) function to
-/// create it.
+///   Sets the status to `OK` and the `Content-Type` to `text/event-stream`
+///   with an event stream body. Use the [`SSE::new`](sse::SSE::new) function
+///   to create it.
 ///
 /// # Create you own response
 ///
 /// ```
 /// use poem::{
-///     handler, http::Uri, test::TestClient, web::Query, Endpoint, IntoResponse, Request, Response,
+///     Endpoint, IntoResponse, Request, Response, handler, http::Uri, test::TestClient, web::Query,
 /// };
 /// use serde::Deserialize;
 ///
@@ -463,7 +471,7 @@ pub trait IntoResponse: Send {
     /// # Example
     ///
     /// ```
-    /// use poem::{http::HeaderValue, IntoResponse};
+    /// use poem::{IntoResponse, http::HeaderValue};
     ///
     /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let resp = "hello".with_header("foo", "bar").into_response();
@@ -494,7 +502,7 @@ pub trait IntoResponse: Send {
     /// # Example
     ///
     /// ```
-    /// use poem::{http::HeaderValue, IntoResponse};
+    /// use poem::{IntoResponse, http::HeaderValue};
     ///
     /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let resp = "hello".with_content_type("text/abc").into_response();
@@ -517,7 +525,7 @@ pub trait IntoResponse: Send {
     /// # Example
     ///
     /// ```
-    /// use poem::{http::StatusCode, IntoResponse};
+    /// use poem::{IntoResponse, http::StatusCode};
     ///
     /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let resp = "hello".with_status(StatusCode::CONFLICT).into_response();
@@ -541,7 +549,7 @@ pub trait IntoResponse: Send {
     /// # Example
     ///
     /// ```
-    /// use poem::{http::StatusCode, IntoResponse};
+    /// use poem::{IntoResponse, http::StatusCode};
     ///
     /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let resp = StatusCode::CONFLICT.with_body("hello").into_response();
@@ -703,7 +711,7 @@ impl<T: IntoResponse> IntoResponse for (StatusCode, HeaderMap, T) {
     fn into_response(self) -> Response {
         let mut resp = self.2.into_response();
         resp.set_status(self.0);
-        resp.headers_mut().extend(self.1.into_iter());
+        resp.headers_mut().extend(self.1);
         resp
     }
 }
@@ -711,7 +719,7 @@ impl<T: IntoResponse> IntoResponse for (StatusCode, HeaderMap, T) {
 impl<T: IntoResponse> IntoResponse for (HeaderMap, T) {
     fn into_response(self) -> Response {
         let mut resp = self.1.into_response();
-        resp.headers_mut().extend(self.0.into_iter());
+        resp.headers_mut().extend(self.0);
         resp
     }
 }
@@ -728,49 +736,42 @@ impl<T: Into<String> + Send> IntoResponse for Html<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for &'a Request {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(req)
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for &'a Uri {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(req.uri())
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for Method {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(req.method().clone())
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for Version {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(req.version())
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for &'a HeaderMap {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(req.headers())
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for Body {
     async fn from_request(_req: &'a Request, body: &mut RequestBody) -> Result<Self> {
         Ok(body.take()?)
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for String {
     async fn from_request(_req: &'a Request, body: &mut RequestBody) -> Result<Self> {
         let data = body.take()?.into_bytes().await?;
@@ -778,45 +779,43 @@ impl<'a> FromRequest<'a> for String {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for Bytes {
     async fn from_request(_req: &'a Request, body: &mut RequestBody) -> Result<Self> {
         Ok(body.take()?.into_bytes().await?)
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for Vec<u8> {
     async fn from_request(_req: &'a Request, body: &mut RequestBody) -> Result<Self> {
         Ok(body.take()?.into_vec().await?)
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for &'a RemoteAddr {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(&req.state().remote_addr)
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for &'a LocalAddr {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(&req.state().local_addr)
     }
 }
 
-#[async_trait::async_trait]
 impl<'a, T: FromRequest<'a>> FromRequest<'a> for Option<T> {
     async fn from_request(req: &'a Request, body: &mut RequestBody) -> Result<Self> {
-        Ok(T::from_request(req, body).await.ok())
+        // FIXME: remove the unnecessary boxed
+        // https://github.com/rust-lang/rust/issues/100013
+        Ok(T::from_request(req, body).boxed().await.ok())
     }
 }
 
-#[async_trait::async_trait]
 impl<'a, T: FromRequest<'a>> FromRequest<'a> for Result<T> {
     async fn from_request(req: &'a Request, body: &mut RequestBody) -> Result<Self> {
-        Ok(T::from_request(req, body).await)
+        // FIXME: remove the unnecessary boxed
+        // https://github.com/rust-lang/rust/issues/100013
+        Ok(T::from_request(req, body).boxed().await)
     }
 }
 
@@ -923,12 +922,12 @@ mod tests {
         #[cfg(feature = "xml")]
         {
             // Xml
-            let resp = Xml(serde_json::json!({ "a": 1, "b": 2})).into_response();
+            let resp = Xml(serde_json::json!({"a": 1, "b": 2})).into_response();
             assert_eq!(resp.status(), StatusCode::OK);
             assert_eq!(resp.content_type(), Some("application/xml; charset=utf-8"));
             assert_eq!(
                 resp.into_body().into_string().await.unwrap(),
-                r#"<a>1</a><b>2</b>"#
+                r#"<root><a>1</a><b>2</b></root>"#
             );
         }
 

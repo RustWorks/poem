@@ -4,11 +4,11 @@ use poem::{FromRequest, IntoResponse, Request, RequestBody, Response, Result};
 use serde_json::Value;
 
 use crate::{
+    ApiResponse,
     error::ParseRequestPayloadError,
     payload::{ParsePayload, Payload},
     registry::{MetaMediaType, MetaResponse, MetaResponses, MetaSchemaRef, Registry},
     types::{ParseFromXML, ToXML, Type},
-    ApiResponse,
 };
 
 /// A XML payload.
@@ -37,7 +37,7 @@ impl<T: Type> Payload for Xml<T> {
                 && (content_type.subtype() == "xml"
                 || content_type
                     .suffix()
-                    .map_or(false, |v| v == "xml")))
+                    .is_some_and(|v| v == "xml")))
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -50,12 +50,11 @@ impl<T: Type> Payload for Xml<T> {
     }
 }
 
-#[poem::async_trait]
 impl<T: ParseFromXML> ParsePayload for Xml<T> {
     const IS_REQUIRED: bool = true;
 
     async fn from_request(request: &Request, body: &mut RequestBody) -> Result<Self> {
-        let data: Vec<u8> = FromRequest::from_request(request, body).await?;
+        let data = Vec::<u8>::from_request(request, body).await?;
         let value = if data.is_empty() {
             Value::Null
         } else {
@@ -85,6 +84,7 @@ impl<T: ToXML> ApiResponse for Xml<T> {
             responses: vec![MetaResponse {
                 description: "",
                 status: Some(200),
+                status_range: None,
                 content: vec![MetaMediaType {
                     content_type: Self::CONTENT_TYPE,
                     schema: Self::schema_ref(),

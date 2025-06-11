@@ -32,7 +32,6 @@ struct BasicAuthEndpoint<E> {
     password: String,
 }
 
-#[poem::async_trait]
 impl<E: Endpoint> Endpoint for BasicAuthEndpoint<E> {
     type Output = E::Output;
 
@@ -62,7 +61,7 @@ async fn main() -> Result<(), std::io::Error> {
         username: "test".to_string(),
         password: "123456".to_string(),
     });
-    Server::new(TcpListener::bind("127.0.0.1:3000"))
+    Server::new(TcpListener::bind("0.0.0.0:3000"))
         .run(app)
         .await
 }

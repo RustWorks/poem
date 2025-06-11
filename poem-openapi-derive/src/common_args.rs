@@ -1,7 +1,7 @@
-use darling::{util::SpannedValue, FromMeta};
+use darling::{FromMeta, util::SpannedValue};
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Lit, Meta, NestedMeta, Path};
+use syn::{Lit, Path};
 
 #[derive(Debug, Copy, Clone, FromMeta)]
 #[allow(clippy::enum_variant_names)]
@@ -94,22 +94,6 @@ pub(crate) fn apply_rename_rule_variant(rule: Option<RenameRule>, variant: Strin
     }
 }
 
-pub(crate) struct PathList(pub(crate) Vec<Path>);
-
-impl FromMeta for PathList {
-    fn from_list(items: &[NestedMeta]) -> darling::Result<Self> {
-        let mut res = Vec::new();
-        for item in items {
-            if let NestedMeta::Meta(Meta::Path(p)) = item {
-                res.push(p.clone());
-            } else {
-                return Err(darling::Error::custom("Invalid path list"));
-            }
-        }
-        Ok(PathList(res))
-    }
-}
-
 #[derive(Debug, Copy, Clone, FromMeta, Eq, PartialEq, Hash)]
 #[darling(rename_all = "lowercase")]
 pub(crate) enum APIMethod {
@@ -171,6 +155,25 @@ impl FromMeta for DefaultValue {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum ExampleValue {
+    Default,
+    Function(Path),
+}
+
+impl FromMeta for ExampleValue {
+    fn from_word() -> darling::Result<Self> {
+        Ok(ExampleValue::Default)
+    }
+
+    fn from_value(value: &Lit) -> darling::Result<Self> {
+        match value {
+            Lit::Str(str) => Ok(ExampleValue::Function(syn::parse_str(&str.value())?)),
+            _ => Err(darling::Error::unexpected_lit_type(value).with_span(value)),
+        }
+    }
+}
+
 #[derive(FromMeta, Clone)]
 pub(crate) struct MaximumValidator {
     pub(crate) value: f64,
@@ -212,12 +215,81 @@ impl ExternalDocument {
 #[derive(FromMeta)]
 pub(crate) struct ExtraHeader {
     pub(crate) name: String,
-    #[darling(rename = "type")]
     pub(crate) ty: SpannedValue<String>,
     #[darling(default)]
     pub(crate) description: Option<String>,
     #[darling(default)]
     pub(crate) deprecated: bool,
+}
+
+pub(crate) enum LitOrPath<T> {
+    Lit(T),
+    Path(syn::Path),
+}
+
+impl<T> darling::FromMeta for LitOrPath<T>
+where
+    T: darling::FromMeta,
+{
+    fn from_nested_meta(item: &darling::ast::NestedMeta) -> darling::Result<Self> {
+        T::from_nested_meta(item)
+            .map(Self::Lit)
+            .or_else(|_| syn::Path::from_nested_meta(item).map(Self::Path))
+    }
+
+    fn from_meta(item: &syn::Meta) -> darling::Result<Self> {
+        T::from_meta(item)
+            .map(Self::Lit)
+            .or_else(|_| syn::Path::from_meta(item).map(Self::Path))
+    }
+
+    fn from_none() -> Option<Self> {
+        T::from_none()
+            .map(Self::Lit)
+            .or_else(|| syn::Path::from_none().map(Self::Path))
+    }
+
+    fn from_word() -> darling::Result<Self> {
+        T::from_word()
+            .map(Self::Lit)
+            .or_else(|_| syn::Path::from_word().map(Self::Path))
+    }
+
+    fn from_list(items: &[darling::ast::NestedMeta]) -> darling::Result<Self> {
+        T::from_list(items)
+            .map(Self::Lit)
+            .or_else(|_| syn::Path::from_list(items).map(Self::Path))
+    }
+
+    fn from_value(value: &Lit) -> darling::Result<Self> {
+        T::from_value(value)
+            .map(Self::Lit)
+            .or_else(|_| syn::Path::from_value(value).map(Self::Path))
+    }
+
+    fn from_expr(expr: &syn::Expr) -> darling::Result<Self> {
+        T::from_expr(expr)
+            .map(Self::Lit)
+            .or_else(|_| syn::Path::from_expr(expr).map(Self::Path))
+    }
+
+    fn from_char(value: char) -> darling::Result<Self> {
+        T::from_char(value)
+            .map(Self::Lit)
+            .or_else(|_| syn::Path::from_char(value).map(Self::Path))
+    }
+
+    fn from_string(value: &str) -> darling::Result<Self> {
+        T::from_string(value)
+            .map(Self::Lit)
+            .or_else(|_| syn::Path::from_string(value).map(Self::Path))
+    }
+
+    fn from_bool(value: bool) -> darling::Result<Self> {
+        T::from_bool(value)
+            .map(Self::Lit)
+            .or_else(|_| syn::Path::from_bool(value).map(Self::Path))
+    }
 }
 
 #[derive(FromMeta)]

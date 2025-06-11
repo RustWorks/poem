@@ -3,19 +3,19 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures_util::{future::BoxFuture, FutureExt};
+use futures_util::{FutureExt, future::BoxFuture};
 use http::StatusCode;
-use tower::{buffer::Buffer, BoxError, Layer, Service, ServiceExt};
+use tower::{BoxError, Layer, Service, ServiceExt, buffer::Buffer};
 
 use crate::{Endpoint, Error, IntoResponse, Middleware, Request, Result};
 
 #[doc(hidden)]
 #[derive(Debug, thiserror::Error)]
-#[error("wrapper error")]
-pub struct WrapperError(Error);
+#[error("{0}")]
+pub struct WrappedError(Error);
 
 fn boxed_err_to_poem_err(err: BoxError) -> Error {
-    match err.downcast::<WrapperError>() {
+    match err.downcast::<WrappedError>() {
         Ok(err) => (*err).0,
         Err(err) => Error::from_string(err.to_string(), StatusCode::INTERNAL_SERVER_ERROR),
     }
@@ -57,7 +57,7 @@ where
     }
 }
 
-/// An endpoint to tower service adapter.
+/// An endpoint to the tower service adapter.
 pub struct EndpointToTowerService<E>(Arc<E>);
 
 impl<E> Service<Request> for EndpointToTowerService<E>
@@ -65,7 +65,7 @@ where
     E: Endpoint + 'static,
 {
     type Response = E::Output;
-    type Error = WrapperError;
+    type Error = WrappedError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -74,14 +74,13 @@ where
 
     fn call(&mut self, req: Request) -> Self::Future {
         let ep = self.0.clone();
-        async move { ep.call(req).await.map_err(WrapperError) }.boxed()
+        async move { ep.call(req).await.map_err(WrappedError) }.boxed()
     }
 }
 
 /// An tower service to endpoint adapter.
 pub struct TowerServiceToEndpoint<Svc: Service<Request>>(Buffer<Svc, Request>);
 
-#[async_trait::async_trait]
 impl<Svc> Endpoint for TowerServiceToEndpoint<Svc>
 where
     Svc: Service<Request> + Send + 'static,
@@ -103,7 +102,7 @@ where
 mod tests {
 
     use super::*;
-    use crate::{endpoint::make_sync, test::TestClient, EndpointExt};
+    use crate::{EndpointExt, endpoint::make_sync, test::TestClient};
 
     #[tokio::test]
     async fn test_tower_layer() {

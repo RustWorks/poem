@@ -4,15 +4,15 @@ use poem::{FromRequest, IntoResponse, Request, RequestBody, Response, Result};
 use serde_json::Value;
 
 use crate::{
+    ApiResponse,
     error::ParseRequestPayloadError,
     payload::{ParsePayload, Payload},
     registry::{MetaMediaType, MetaResponse, MetaResponses, MetaSchemaRef, Registry},
     types::{ParseFromJSON, ToJSON, Type},
-    ApiResponse,
 };
 
 /// A JSON payload.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct Json<T>(pub T);
 
 impl<T> Deref for Json<T> {
@@ -37,7 +37,7 @@ impl<T: Type> Payload for Json<T> {
                 && (content_type.subtype() == "json"
                 || content_type
                     .suffix()
-                    .map_or(false, |v| v == "json")))
+                    .is_some_and(|v| v == "json")))
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -50,12 +50,11 @@ impl<T: Type> Payload for Json<T> {
     }
 }
 
-#[poem::async_trait]
 impl<T: ParseFromJSON> ParsePayload for Json<T> {
-    const IS_REQUIRED: bool = true;
+    const IS_REQUIRED: bool = T::IS_REQUIRED;
 
     async fn from_request(request: &Request, body: &mut RequestBody) -> Result<Self> {
-        let data: Vec<u8> = FromRequest::from_request(request, body).await?;
+        let data = Vec::<u8>::from_request(request, body).await?;
         let value = if data.is_empty() {
             Value::Null
         } else {
@@ -83,6 +82,7 @@ impl<T: ToJSON> ApiResponse for Json<T> {
             responses: vec![MetaResponse {
                 description: "",
                 status: Some(200),
+                status_range: None,
                 content: vec![MetaMediaType {
                     content_type: Self::CONTENT_TYPE,
                     schema: Self::schema_ref(),

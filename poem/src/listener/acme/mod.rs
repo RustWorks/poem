@@ -12,12 +12,14 @@ mod keypair;
 mod listener;
 mod protocol;
 mod resolver;
-mod serde;
 
 pub use auto_cert::AutoCert;
 pub use builder::AutoCertBuilder;
-pub use listener::{AutoCertAcceptor, AutoCertListener};
+pub use client::AcmeClient;
+pub use endpoint::{Http01Endpoint, Http01TokensMap};
+pub use listener::{AutoCertAcceptor, AutoCertListener, ResolvedCertListener, issue_cert};
 pub use protocol::ChallengeType;
+pub use resolver::{ResolveServerCert, seconds_until_expiry};
 
 /// Let's Encrypt production directory url
 pub const LETS_ENCRYPT_PRODUCTION: &str = "https://acme-v02.api.letsencrypt.org/directory";

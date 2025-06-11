@@ -6,7 +6,7 @@ use crate::{
 };
 
 #[derive(Display)]
-#[display(fmt = "minLength({len})")]
+#[display("minLength({len})")]
 pub struct MinLength {
     len: usize,
 }
@@ -21,7 +21,7 @@ impl MinLength {
 impl<T: AsRef<str>> Validator<T> for MinLength {
     #[inline]
     fn check(&self, value: &T) -> bool {
-        value.as_ref().len() >= self.len
+        self.len == 0 || value.as_ref().chars().nth(self.len - 1).is_some()
     }
 }
 

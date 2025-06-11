@@ -1,6 +1,6 @@
 use crate::{Endpoint, Middleware, Request, Result};
 
-/// Middleware for add any data to request.
+/// Middleware for adding any data to a request.
 pub struct AddData<T> {
     value: T,
 }
@@ -27,13 +27,12 @@ where
     }
 }
 
-/// Endpoint for AddData middleware.
+/// Endpoint for the AddData middleware.
 pub struct AddDataEndpoint<E, T> {
     inner: E,
     value: T,
 }
 
-#[async_trait::async_trait]
 impl<E, T> Endpoint for AddDataEndpoint<E, T>
 where
     E: Endpoint,
@@ -50,7 +49,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{handler, test::TestClient, EndpointExt};
+    use crate::{EndpointExt, handler, test::TestClient};
 
     #[tokio::test]
     async fn test_add_data() {

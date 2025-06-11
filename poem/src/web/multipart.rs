@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 #[cfg(feature = "tempfile")]
 use tokio::io::{AsyncSeekExt, SeekFrom};
 
-use crate::{error::ParseMultipartError, http::header, FromRequest, Request, RequestBody, Result};
+use crate::{FromRequest, Request, RequestBody, Result, error::ParseMultipartError, http::header};
 
 /// A single field in a multipart stream.
 #[cfg_attr(docsrs, doc(cfg(feature = "multipart")))]
@@ -111,9 +111,9 @@ impl Field {
 ///
 /// ```
 /// use poem::{
+///     Result,
 ///     error::{BadRequest, Error},
 ///     web::Multipart,
-///     Result,
 /// };
 ///
 /// async fn upload(mut multipart: Multipart) -> Result<()> {
@@ -129,7 +129,6 @@ pub struct Multipart {
     inner: multer::Multipart<'static>,
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for Multipart {
     async fn from_request(req: &'a Request, body: &mut RequestBody) -> Result<Self> {
         let content_type = req

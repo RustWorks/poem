@@ -1,8 +1,6 @@
-use std::convert::TryInto;
-
 use crate::{
-    http::{header::HeaderName, HeaderValue},
     Endpoint, IntoResponse, Middleware, Request, Response, Result,
+    http::{HeaderValue, header::HeaderName},
 };
 
 #[derive(Debug, Clone)]
@@ -11,17 +9,16 @@ enum Action {
     Append(HeaderName, HeaderValue),
 }
 
-/// Middleware for override/append headers to response.
+/// Middleware to override or append headers to a response.
 ///
 /// # Example
 ///
 /// ```
 /// use poem::{
-///     get, handler,
+///     Endpoint, EndpointExt, Request, Route, get, handler,
 ///     http::{HeaderValue, StatusCode},
 ///     middleware::SetHeader,
 ///     test::TestClient,
-///     Endpoint, EndpointExt, Request, Route,
 /// };
 ///
 /// #[handler]
@@ -56,10 +53,10 @@ impl SetHeader {
         Default::default()
     }
 
-    /// Inserts a header to response.
+    /// Inserts a header into the response.
     ///
-    /// If a previous value exists for the same header, it is
-    /// removed and replaced with the new header value.
+    /// If a previous value exists for the same header, it will
+    /// be overridden.
     #[must_use]
     pub fn overriding<K, V>(mut self, key: K, value: V) -> Self
     where
@@ -74,7 +71,7 @@ impl SetHeader {
         self
     }
 
-    /// Appends a header to response.
+    /// Appends a header to the response.
     ///
     /// If previous values exist, the header will have multiple values.
     #[must_use]
@@ -103,13 +100,12 @@ impl<E: Endpoint> Middleware<E> for SetHeader {
     }
 }
 
-/// Endpoint for SetHeader middleware.
+/// Endpoint for the SetHeader middleware.
 pub struct SetHeaderEndpoint<E> {
     inner: E,
     actions: Vec<Action>,
 }
 
-#[async_trait::async_trait]
 impl<E: Endpoint> Endpoint for SetHeaderEndpoint<E> {
     type Output = Response;
 
@@ -135,7 +131,7 @@ impl<E: Endpoint> Endpoint for SetHeaderEndpoint<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{handler, test::TestClient, EndpointExt};
+    use crate::{EndpointExt, handler, test::TestClient};
 
     #[tokio::test]
     async fn test_set_header() {

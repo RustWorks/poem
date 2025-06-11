@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use crate::{error::GetDataError, FromRequest, Request, RequestBody, Result};
+use crate::{FromRequest, Request, RequestBody, Result, error::GetDataError};
 
 /// An extractor that can extract data from the request extension.
 ///
@@ -12,8 +12,8 @@ use crate::{error::GetDataError, FromRequest, Request, RequestBody, Result};
 ///
 /// ```
 /// use poem::{
-///     get, handler, http::StatusCode, middleware::AddData, web::Data, Endpoint, EndpointExt,
-///     Request, Route,
+///     Endpoint, EndpointExt, Request, Route, get, handler, http::StatusCode, middleware::AddData,
+///     web::Data,
 /// };
 ///
 /// #[handler]
@@ -37,7 +37,6 @@ impl<T> Deref for Data<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a, T: Send + Sync + 'static> FromRequest<'a> for Data<&'a T> {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(Data(
@@ -53,7 +52,7 @@ mod tests {
     use http::StatusCode;
 
     use super::*;
-    use crate::{handler, middleware::AddData, test::TestClient, EndpointExt};
+    use crate::{EndpointExt, handler, middleware::AddData, test::TestClient};
 
     #[tokio::test]
     async fn test_data_extractor() {

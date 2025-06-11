@@ -3,14 +3,14 @@ use std::{str::FromStr, sync::Arc};
 use regex::Regex;
 
 use crate::{
-    endpoint::BoxEndpoint,
-    error::{NotFoundError, RouteError},
-    http::{uri::PathAndQuery, Uri},
-    route::{check_result, internal::radix_tree::RadixTree},
     Endpoint, EndpointExt, IntoEndpoint, IntoResponse, Request, Response, Result,
+    endpoint::BoxEndpoint,
+    error::{NotFoundError, ParsePathError, RouteError},
+    http::{Uri, uri::PathAndQuery},
+    route::{check_result, internal::radix_tree::RadixTree},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct PathPrefix(usize);
 
 /// Routing object
@@ -26,11 +26,10 @@ struct PathPrefix(usize);
 ///
 /// ```
 /// use poem::{
-///     get, handler,
+///     Endpoint, Request, Route, get, handler,
 ///     http::{StatusCode, Uri},
 ///     test::TestClient,
 ///     web::Path,
-///     Endpoint, Request, Route,
 /// };
 ///
 /// #[handler]
@@ -83,10 +82,9 @@ struct PathPrefix(usize);
 ///
 /// ```
 /// use poem::{
-///     handler,
+///     Endpoint, Request, Route, handler,
 ///     http::{StatusCode, Uri},
 ///     test::TestClient,
-///     Endpoint, Request, Route,
 /// };
 ///
 /// #[handler]
@@ -108,10 +106,9 @@ struct PathPrefix(usize);
 ///
 /// ```
 /// use poem::{
-///     handler,
+///     Endpoint, Request, Route, handler,
 ///     http::{StatusCode, Uri},
 ///     test::TestClient,
-///     Endpoint, Request, Route,
 /// };
 ///
 /// #[handler]
@@ -244,15 +241,17 @@ impl Route {
             prefix_for_path_pattern: usize,
         }
 
-        #[async_trait::async_trait]
         impl<E: Endpoint> Endpoint for Nest<E> {
             type Output = Response;
 
             async fn call(&self, mut req: Request) -> Result<Self::Output> {
                 if !self.root {
-                    let idx = req.state().match_params.len() - 1;
-                    let (name, _) = req.state_mut().match_params.remove(idx);
-                    assert_eq!(name, "--poem-rest");
+                    let params = &mut req.state_mut().match_params;
+                    if params.last().map(|(name, _)| name.as_str()) != Some("--poem-rest") {
+                        return Err(ParsePathError.into());
+                    }
+
+                    params.pop().expect("can't be empty due to a check above");
                 }
 
                 let new_uri = {
@@ -298,22 +297,24 @@ impl Route {
 
         self.tree.add(
             &format!("{path}*--poem-rest"),
-            Box::new(Nest {
+            Nest {
                 inner: ep.clone(),
                 root: false,
                 prefix_len,
                 prefix_for_path_pattern,
-            }),
+            }
+            .boxed(),
         )?;
 
         self.tree.add(
             &path[..path.len() - 1],
-            Box::new(Nest {
+            Nest {
                 inner: ep,
                 root: true,
                 prefix_len,
                 prefix_for_path_pattern,
-            }),
+            }
+            .boxed(),
         )?;
 
         Ok(self)
@@ -324,7 +325,6 @@ impl Route {
 #[derive(Debug, Clone)]
 pub struct PathPattern(pub Arc<str>);
 
-#[async_trait::async_trait]
 impl Endpoint for Route {
     type Output = Response;
 
@@ -384,10 +384,10 @@ fn normalize_path(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use futures_util::lock::Mutex;
-    use http::{StatusCode, Uri};
+    use http::StatusCode;
 
     use super::*;
-    use crate::{endpoint::make_sync, handler, test::TestClient, Error};
+    use crate::{Error, endpoint::make_sync, handler, test::TestClient};
 
     #[test]
     fn test_normalize_path() {
@@ -536,6 +536,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn issue_471() {
+        let app = Route::new().nest("/", make_sync(|_| "hello"));
+        assert_eq!(
+            app.get_response(Request::builder().uri(Uri::from_static("/%d0")).finish())
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test]
     async fn path_pattern() {
         let app = Route::new()
             .at(
@@ -638,7 +649,6 @@ mod tests {
         inner: E,
     }
 
-    #[async_trait::async_trait]
     impl<E: Endpoint> Endpoint for PathPatternSpyEndpoint<E> {
         type Output = Response;
 
@@ -709,7 +719,6 @@ mod tests {
 
     struct ErrorEndpoint;
 
-    #[async_trait::async_trait]
     impl Endpoint for ErrorEndpoint {
         type Output = Response;
 

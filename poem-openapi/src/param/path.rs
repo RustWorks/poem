@@ -3,10 +3,10 @@ use std::ops::{Deref, DerefMut};
 use poem::{Request, RequestBody, Result};
 
 use crate::{
+    ApiExtractor, ApiExtractorType, ExtractParamOptions,
     error::ParsePathError,
     registry::{MetaParamIn, MetaSchemaRef, Registry},
     types::ParseFromParameter,
-    ApiExtractor, ApiExtractorType, ExtractParamOptions,
 };
 
 /// Represents the parameters passed by the URI path.
@@ -26,9 +26,8 @@ impl<T> DerefMut for Path<T> {
     }
 }
 
-#[poem::async_trait]
 impl<'a, T: ParseFromParameter> ApiExtractor<'a> for Path<T> {
-    const TYPE: ApiExtractorType = ApiExtractorType::Parameter;
+    const TYPES: &'static [ApiExtractorType] = &[ApiExtractorType::Parameter];
     const PARAM_IS_REQUIRED: bool = T::IS_REQUIRED;
 
     type ParamType = T;

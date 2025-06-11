@@ -1,16 +1,16 @@
 use std::{collections::HashMap, sync::Arc};
 
 use futures_util::StreamExt;
-use poem::{endpoint::BoxEndpoint, IntoEndpoint};
+use poem::{IntoEndpoint, endpoint::BoxEndpoint};
 use prost::Message;
 use prost_types::{DescriptorProto, EnumDescriptorProto, FileDescriptorProto, FileDescriptorSet};
 use proto::{
     server_reflection_request::MessageRequest, server_reflection_response::MessageResponse,
 };
 
-use crate::{include_file_descriptor_set, Code, Request, Response, Service, Status, Streaming};
+use crate::{Code, Request, Response, Service, Status, Streaming};
 
-#[allow(private_in_public, unreachable_pub)]
+#[allow(unreachable_pub)]
 #[allow(clippy::enum_variant_names)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 mod proto {
@@ -26,6 +26,7 @@ struct State {
 }
 
 impl State {
+    #[allow(clippy::result_large_err)]
     fn file_by_filename(&self, filename: &str) -> Result<MessageResponse, Status> {
         match self.files.get(filename) {
             None => {
@@ -47,6 +48,7 @@ impl State {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn symbol_by_name(&self, symbol: &str) -> Result<MessageResponse, Status> {
         match self.symbols.get(symbol) {
             None => {
@@ -80,7 +82,6 @@ struct ServerReflectionService {
     state: Arc<State>,
 }
 
-#[poem::async_trait]
 impl proto::ServerReflection for ServerReflectionService {
     async fn server_reflection_info(
         &self,
@@ -139,7 +140,7 @@ impl Reflection {
         let fd_iter = std::mem::take(&mut this.file_descriptor_sets)
             .into_iter()
             .flat_map(|fds| fds.file.into_iter());
-        let mut files = HashMap::new();
+        let mut files = HashMap::with_capacity(fd_iter.size_hint().0);
 
         for fd in fd_iter {
             let fd = Arc::new(fd);

@@ -4,7 +4,7 @@ use std::{
 };
 
 use bytes::{BufMut, BytesMut};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::codec::{Codec, Decoder, Encoder};
 
@@ -88,7 +88,7 @@ where
     T: Serialize + Send + 'static,
     U: DeserializeOwned + Send + 'static,
 {
-    const CONTENT_TYPES: &'static [&'static str] = &["application/json", "application/grpc+json"];
+    const CONTENT_TYPES: &'static [&'static str] = &["application/grpc+json", "application/json"];
 
     type Encode = T;
     type Decode = U;

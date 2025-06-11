@@ -1,8 +1,8 @@
-use poem::{http::StatusCode, test::TestClient, IntoResponse};
+use poem::{IntoResponse, http::StatusCode, test::TestClient};
 use poem_openapi::{
+    ApiResponse, Object, OpenApi, OpenApiService, ResponseContent,
     payload::{Binary, Json, Payload, PlainText},
     registry::{MetaApi, MetaMediaType, MetaResponse, MetaResponses, Registry},
-    ApiResponse, Object, OpenApi, OpenApiService, ResponseContent,
 };
 
 #[derive(ResponseContent)]
@@ -63,6 +63,7 @@ async fn use_in_api_response() {
             responses: vec![MetaResponse {
                 description: "",
                 status: Some(200),
+                status_range: None,
                 content: MyResponseContent::media_types(),
                 headers: vec![]
             }]

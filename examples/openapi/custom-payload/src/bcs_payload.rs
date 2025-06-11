@@ -50,12 +50,11 @@ impl<T: Type> Payload for Bcs<T> {
     }
 }
 
-#[poem::async_trait]
 impl<T: Type + for<'b> Deserialize<'b>> ParsePayload for Bcs<T> {
     const IS_REQUIRED: bool = true;
 
     async fn from_request(request: &Request, body: &mut RequestBody) -> Result<Self> {
-        let data: Vec<u8> = FromRequest::from_request(request, body).await?;
+        let data = Vec::<u8>::from_request(request, body).await?;
         let value: T = from_bytes(&data).map_err(|err| ParseRequestPayloadError {
             reason: err.to_string(),
         })?;
@@ -85,6 +84,7 @@ impl<T: Serialize + Type> ApiResponse for Bcs<T> {
             responses: vec![MetaResponse {
                 description: "",
                 status: Some(200),
+                status_range: None,
                 content: vec![MetaMediaType {
                     content_type: Self::CONTENT_TYPE,
                     schema: Self::schema_ref(),

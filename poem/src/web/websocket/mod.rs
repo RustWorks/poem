@@ -5,9 +5,8 @@
 //! ```
 //! use futures_util::{SinkExt, StreamExt};
 //! use poem::{
-//!     get, handler,
+//!     IntoResponse, Route, get, handler,
 //!     web::websocket::{Message, WebSocket},
-//!     IntoResponse, Route,
 //! };
 //!
 //! #[handler]
@@ -30,19 +29,19 @@ mod utils;
 pub use extractor::{BoxWebSocketUpgraded, WebSocket, WebSocketUpgraded};
 pub use message::{CloseCode, Message};
 pub use stream::WebSocketStream;
+pub use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
 
     use futures_util::{SinkExt, StreamExt};
-    use http::{header, HeaderValue};
+    use http::{HeaderValue, header};
 
     use super::*;
     use crate::{
-        handler,
+        IntoResponse, Server, handler,
         listener::{Acceptor, Listener, TcpListener},
-        IntoResponse, Server,
     };
 
     #[tokio::test]
@@ -92,7 +91,6 @@ mod tests {
 
         check(addr, "aaa", Some(&HeaderValue::from_static("aaa"))).await;
         check(addr, "bbb", Some(&HeaderValue::from_static("bbb"))).await;
-        check(addr, "ccc", None).await;
 
         handle.abort();
     }
@@ -137,25 +135,21 @@ mod tests {
             .unwrap();
 
         client_stream
-            .send(tokio_tungstenite::tungstenite::Message::Text(
-                "aBc".to_string(),
-            ))
+            .send(tokio_tungstenite::tungstenite::Message::Text("aBc".into()))
             .await
             .unwrap();
         assert_eq!(
             client_stream.next().await.unwrap().unwrap(),
-            tokio_tungstenite::tungstenite::Message::Text("ABC".to_string())
+            tokio_tungstenite::tungstenite::Message::Text("ABC".into())
         );
 
         client_stream
-            .send(tokio_tungstenite::tungstenite::Message::Text(
-                "def".to_string(),
-            ))
+            .send(tokio_tungstenite::tungstenite::Message::Text("def".into()))
             .await
             .unwrap();
         assert_eq!(
             client_stream.next().await.unwrap().unwrap(),
-            tokio_tungstenite::tungstenite::Message::Text("DEF".to_string())
+            tokio_tungstenite::tungstenite::Message::Text("DEF".into())
         );
 
         handle.abort();

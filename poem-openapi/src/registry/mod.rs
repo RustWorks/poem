@@ -9,10 +9,10 @@ use std::{
 
 use poem::http::Method;
 pub(crate) use ser::Document;
-use serde::{ser::SerializeMap, Serialize, Serializer};
+use serde::{Serialize, Serializer, ser::SerializeMap};
 use serde_json::Value;
 
-use crate::types::Type;
+use crate::{ParameterStyle, types::Type};
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
 #[inline]
@@ -75,6 +75,8 @@ pub struct MetaSchema {
     pub enum_items: Vec<Value>,
     #[serde(skip_serializing_if = "is_false")]
     pub deprecated: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub nullable: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub any_of: Vec<MetaSchemaRef>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -150,6 +152,7 @@ impl MetaSchema {
         discriminator: None,
         read_only: false,
         write_only: false,
+        nullable: false,
         example: None,
         multiple_of: None,
         maximum: None,
@@ -189,6 +192,8 @@ impl MetaSchema {
             default,
             read_only,
             write_only,
+            deprecated,
+            nullable,
             title,
             description,
             external_docs,
@@ -213,6 +218,8 @@ impl MetaSchema {
     ) -> Self {
         self.read_only |= read_only;
         self.write_only |= write_only;
+        self.nullable |= nullable;
+        self.deprecated |= deprecated;
 
         macro_rules! merge_optional {
             ($($name:ident),*) => {
@@ -333,9 +340,9 @@ impl MetaSchemaRef {
                     MetaSchemaRef::Inline(Box::new(MetaSchema {
                         all_of: vec![
                             MetaSchemaRef::Reference(name),
-                            MetaSchemaRef::Inline(Box::new(other)),
+                            MetaSchemaRef::Inline(Box::new(other.clone())),
                         ],
-                        ..MetaSchema::ANY
+                        ..other
                     }))
                 }
             }
@@ -367,6 +374,8 @@ pub struct MetaOperationParam {
     pub required: bool,
     pub deprecated: bool,
     pub explode: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style: Option<ParameterStyle>,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -422,6 +431,8 @@ pub struct MetaResponse {
     pub description: &'static str,
     #[serde(skip)]
     pub status: Option<u16>,
+    #[serde(skip)]
+    pub status_range: Option<String>,
     #[serde(
         skip_serializing_if = "Vec::is_empty",
         serialize_with = "serialize_content"
@@ -491,7 +502,7 @@ pub struct MetaOperation {
 
 #[derive(Debug, PartialEq)]
 pub struct MetaPath {
-    pub path: &'static str,
+    pub path: String,
     pub operations: Vec<MetaOperation>,
 }
 
@@ -536,6 +547,20 @@ pub struct MetaServer {
     pub url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub variables: BTreeMap<String, MetaServerVariable>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize, Clone)]
+pub struct MetaServerVariable {
+    pub default: String,
+
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+
+    #[serde(rename = "enum", skip_serializing_if = "Vec::is_empty")]
+    pub enum_values: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
@@ -565,7 +590,7 @@ impl Eq for MetaTag {}
 
 impl PartialOrd for MetaTag {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.name.partial_cmp(other.name)
+        Some(self.name.cmp(other.name))
     }
 }
 

@@ -1,11 +1,11 @@
 use std::ops::{Deref, DerefMut};
 
 use http::StatusCode;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    error::ParseXmlError, http::header, web::RequestBody, FromRequest, IntoResponse, Request,
-    Response, Result,
+    FromRequest, IntoResponse, Request, Response, Result, error::ParseXmlError, http::header,
+    web::RequestBody,
 };
 
 /// XML extractor and response.
@@ -20,17 +20,17 @@ use crate::{
 ///
 /// ```
 /// use poem::{
-///     handler,
-///     http::{header, Method, StatusCode},
+///     Endpoint, Request, Route, handler,
+///     http::{Method, StatusCode, header},
 ///     post,
 ///     test::TestClient,
 ///     web::Xml,
-///     Endpoint, Request, Route,
 /// };
 /// use serde::Deserialize;
 ///
 /// #[derive(Deserialize)]
 /// struct User {
+///     #[serde(rename = "@name")]
 ///     name: String,
 /// }
 ///
@@ -61,12 +61,13 @@ use crate::{
 ///
 /// ```
 /// use poem::{
-///     get, handler, http::StatusCode, test::TestClient, web::Xml, Endpoint, Request, Route,
+///     Endpoint, Request, Route, get, handler, http::StatusCode, test::TestClient, web::Xml,
 /// };
 /// use serde::Serialize;
 ///
 /// #[derive(Serialize)]
 /// struct User {
+///     #[serde(rename = "@name")]
 ///     name: String,
 /// }
 ///
@@ -104,7 +105,6 @@ impl<T> DerefMut for Xml<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a, T: DeserializeOwned> FromRequest<'a> for Xml<T> {
     async fn from_request(req: &'a Request, body: &mut RequestBody) -> Result<Self> {
         let content_type = req
@@ -129,18 +129,30 @@ fn is_xml_content_type(content_type: &str) -> bool {
         && (content_type.subtype() == "xml"
         || content_type
             .suffix()
-            .map_or(false, |v| v == "xml")))
+            .is_some_and(|v| v == "xml")))
 }
 
 impl<T: Serialize + Send> IntoResponse for Xml<T> {
     fn into_response(self) -> Response {
         let data = match quick_xml::se::to_string(&self.0) {
             Ok(data) => data,
-            Err(err) => {
-                return Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(err.to_string())
-            }
+            Err(err) => match err {
+                quick_xml::DeError::Unsupported(_) => {
+                    match quick_xml::se::to_string_with_root("root", &self.0) {
+                        Ok(data) => data,
+                        Err(err) => {
+                            return Response::builder()
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .body(err.to_string());
+                        }
+                    }
+                }
+                _ => {
+                    return Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(err.to_string());
+                }
+            },
         };
         Response::builder()
             .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")

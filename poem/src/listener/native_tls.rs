@@ -1,10 +1,10 @@
 use futures_util::{
-    stream::{BoxStream, Chain, Pending},
     Stream, StreamExt, TryFutureExt,
+    stream::{BoxStream, Chain, Pending},
 };
 use http::uri::Scheme;
 use tokio::io::{Error as IoError, ErrorKind, Result as IoResult};
-use tokio_native_tls::{native_tls::Identity, TlsStream};
+use tokio_native_tls::{TlsStream, native_tls::Identity};
 
 use crate::{
     listener::{Acceptor, HandshakeStream, IntoTlsConfigStream, Listener},
@@ -103,7 +103,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<T: Listener, S: IntoTlsConfigStream<NativeTlsConfig>> Listener for NativeTlsListener<T, S> {
     type Acceptor = NativeTlsAcceptor<T::Acceptor, BoxStream<'static, NativeTlsConfig>>;
 
@@ -136,7 +135,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<T, S> Acceptor for NativeTlsAcceptor<T, S>
 where
     S: Stream<Item = NativeTlsConfig> + Send + Unpin + 'static,

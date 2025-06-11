@@ -20,9 +20,9 @@
     <img src="https://img.shields.io/badge/unsafe-forbidden-success.svg?style=flat-square"
       alt="Unsafe Rust forbidden" />
   </a>
-  <a href="https://blog.rust-lang.org/2022/09/22/Rust-1.64.0.html">
-    <img src="https://img.shields.io/badge/rustc-1.64.0+-ab6000.svg"
-      alt="rustc 1.64.0+" />
+  <a>
+    <img src="https://img.shields.io/badge/rustc-1.85.0+-ab6000.svg"
+      alt="rustc 1.85.0+" />
   </a>
 </div>
 
@@ -36,7 +36,6 @@ poem_grpc::include_proto!("helloworld");
 
 struct GreeterService;
 
-#[poem::async_trait]
 impl Greeter for GreeterService {
     async fn say_hello(
         &self,
@@ -52,7 +51,7 @@ impl Greeter for GreeterService {
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
     let route = RouteGrpc::new().add_service(GreeterServer::new(GreeterService));
-    Server::new(TcpListener::bind("127.0.0.1:3000"))
+    Server::new(TcpListener::bind("0.0.0.0:3000"))
         .run(route)
         .await
 }
@@ -64,7 +63,7 @@ This crate uses `#![forbid(unsafe_code)]` to ensure everything is implemented in
 
 ## MSRV
 
-The minimum supported Rust version for this crate is `1.64.0`.
+The minimum supported Rust version for this crate is `1.85.0`.
 
 ## Contributing
 

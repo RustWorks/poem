@@ -36,7 +36,7 @@ impl<T: Type> Payload for Form<T> {
                 && (content_type.subtype() == "x-www-form-urlencoded"
                 || content_type
                     .suffix()
-                    .map_or(false, |v| v == "x-www-form-urlencoded")))
+                    .is_some_and(|v| v == "x-www-form-urlencoded")))
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -49,12 +49,11 @@ impl<T: Type> Payload for Form<T> {
     }
 }
 
-#[poem::async_trait]
 impl<T: DeserializeOwned> ParsePayload for Form<T> {
     const IS_REQUIRED: bool = true;
 
     async fn from_request(req: &Request, body: &mut RequestBody) -> Result<Self> {
-        let data: Vec<u8> = FromRequest::from_request(req, body).await?;
+        let data = Vec::<u8>::from_request(req, body).await?;
         Ok(Self(serde_urlencoded::from_bytes(&data).map_err(
             |err| ParseRequestPayloadError {
                 reason: err.to_string(),

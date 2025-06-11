@@ -14,9 +14,9 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    error::ParseCookieError,
-    http::{header, HeaderMap},
     FromRequest, Request, RequestBody, Result,
+    error::ParseCookieError,
+    http::{HeaderMap, header},
 };
 
 /// The `SameSite` cookie attribute.
@@ -39,10 +39,20 @@ impl Display for Cookie {
 impl Cookie {
     /// Creates a new Cookie with the given `name` and serialized `value`.
     pub fn new(name: impl Into<String>, value: impl Serialize) -> Self {
-        Self(libcookie::Cookie::new(
-            name.into(),
-            serde_json::to_string(&value).unwrap_or_default(),
-        ))
+        #[cfg(not(feature = "sonic-rs"))]
+        {
+            Self(libcookie::Cookie::new(
+                name.into(),
+                serde_json::to_string(&value).unwrap_or_default(),
+            ))
+        }
+        #[cfg(feature = "sonic-rs")]
+        {
+            Self(libcookie::Cookie::new(
+                name.into(),
+                sonic_rs::to_string(&value).unwrap_or_default(),
+            ))
+        }
     }
 
     /// Creates a new Cookie with the given `name` and `value`.
@@ -223,6 +233,20 @@ impl Cookie {
         self.0.secure().unwrap_or_default()
     }
 
+    /// Returns whether this cookie was marked `Partitioned` or not.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use poem::web::cookie::Cookie;
+    ///
+    /// let cookie = Cookie::parse("foo=bar; Partitioned").unwrap();
+    /// assert!(cookie.partitioned());
+    /// ```
+    pub fn partitioned(&self) -> bool {
+        self.0.partitioned().unwrap_or_default()
+    }
+
     /// Sets the `domain` of `self` to `domain`.
     pub fn set_domain(&mut self, domain: impl Into<String>) {
         self.0.set_domain(domain.into());
@@ -268,6 +292,11 @@ impl Cookie {
         self.0.set_secure(value);
     }
 
+    /// Sets the value of `Partitioned` in `self` to `value`.
+    pub fn set_partitioned(&mut self, value: impl Into<Option<bool>>) {
+        self.0.set_partitioned(value);
+    }
+
     /// Sets the value of `self` to `value`.
     pub fn set_value_str(&mut self, value: impl Into<String>) {
         self.0.set_value(value.into());
@@ -275,7 +304,12 @@ impl Cookie {
 
     /// Sets the value of `self` to the serialized `value`.
     pub fn set_value(&mut self, value: impl Serialize) {
-        if let Ok(value) = serde_json::to_string(&value) {
+        #[cfg(not(feature = "sonic-rs"))]
+        let json_string = serde_json::to_string(&value);
+        #[cfg(feature = "sonic-rs")]
+        let json_string = sonic_rs::to_string(&value);
+
+        if let Ok(value) = json_string {
             self.0.set_value(value);
         }
     }
@@ -287,11 +321,17 @@ impl Cookie {
 
     /// Returns the value of `self` to the deserialized `value`.
     pub fn value<'de, T: Deserialize<'de>>(&'de self) -> Result<T, ParseCookieError> {
-        serde_json::from_str(self.0.value()).map_err(ParseCookieError::ParseJsonValue)
+        #[cfg(not(feature = "sonic-rs"))]
+        {
+            serde_json::from_str(self.0.value()).map_err(ParseCookieError::ParseJsonValue)
+        }
+        #[cfg(feature = "sonic-rs")]
+        {
+            sonic_rs::from_str(self.0.value()).map_err(ParseCookieError::ParseJsonValue)
+        }
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for Cookie {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         let value = req
@@ -307,18 +347,23 @@ impl<'a> FromRequest<'a> for Cookie {
     }
 }
 
+impl From<libcookie::Cookie<'static>> for Cookie {
+    fn from(value: libcookie::Cookie<'static>) -> Self {
+        Self(value)
+    }
+}
+
 /// A collection of cookies that tracks its modifications.
 ///
 /// # Example
 ///
 /// ```
 /// use poem::{
-///     get, handler,
-///     http::{header, StatusCode},
+///     Endpoint, EndpointExt, Request, Route, get, handler,
+///     http::{StatusCode, header},
 ///     middleware::CookieJarManager,
 ///     test::TestClient,
 ///     web::cookie::{Cookie, CookieJar},
-///     Endpoint, EndpointExt, Request, Route,
 /// };
 ///
 /// #[handler]
@@ -364,13 +409,27 @@ impl CookieJar {
     pub fn remove(&self, name: impl AsRef<str>) {
         self.jar
             .lock()
-            .remove(libcookie::Cookie::named(name.as_ref().to_string()));
+            .remove(libcookie::Cookie::build(name.as_ref().to_string()));
     }
 
     /// Returns a reference to the [`Cookie`] inside this jar with the `name`.
+    ///
     /// If no such cookie exists, returns `None`.
     pub fn get(&self, name: &str) -> Option<Cookie> {
         self.jar.lock().get(name).cloned().map(Cookie)
+    }
+
+    /// Returns a reference to the [`Cookie`] inside this jar with the `name`
+    /// ignore the case.
+    ///
+    /// If no such cookie exists, returns `None`.
+    pub fn get_ignore_ascii_case(&self, name: &str) -> Option<Cookie> {
+        self.jar
+            .lock()
+            .iter()
+            .find(|cookie| cookie.name().eq_ignore_ascii_case(name))
+            .cloned()
+            .map(Cookie)
     }
 
     /// Removes all delta cookies.
@@ -501,7 +560,6 @@ impl FromStr for CookieJar {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for &'a CookieJar {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(req.cookie())
@@ -516,7 +574,17 @@ impl CookieJar {
             if let Ok(value) = value.to_str() {
                 for cookie_str in value.split(';').map(str::trim) {
                     if let Ok(cookie) = libcookie::Cookie::parse_encoded(cookie_str) {
-                        cookie_jar.add_original(cookie.into_owned());
+                        // This check is important. Poem currently only
+                        // supports tracking a single cookie by name.
+                        // RFC 6265, Section 5.4, says that user agents SHOULD
+                        // sort cookies from most specific to least specific
+                        // path.
+                        // That means that poem should take the *first* cookie
+                        // for a given name (instead of the *last*, as it would
+                        // happen if this condition wasn't enforced).
+                        if cookie_jar.get(cookie.name()).is_none() {
+                            cookie_jar.add_original(cookie.into_owned());
+                        }
                     }
                 }
             }
@@ -548,7 +616,7 @@ pub struct PrivateCookieJar<'a> {
     cookie_jar: &'a CookieJar,
 }
 
-impl<'a> PrivateCookieJar<'a> {
+impl PrivateCookieJar<'_> {
     /// Adds cookie to the parent jar. The cookie’s value is encrypted with
     /// authenticated encryption assuring confidentiality, integrity, and
     /// authenticity.
@@ -562,7 +630,7 @@ impl<'a> PrivateCookieJar<'a> {
     pub fn remove(&self, name: impl AsRef<str>) {
         let mut cookie_jar = self.cookie_jar.jar.lock();
         let mut private_cookie_jar = cookie_jar.private_mut(self.key);
-        private_cookie_jar.remove(libcookie::Cookie::named(name.as_ref().to_string()));
+        private_cookie_jar.remove(libcookie::Cookie::build(name.as_ref().to_string()));
     }
 
     /// Returns cookie inside this jar with the name and authenticates and
@@ -574,6 +642,19 @@ impl<'a> PrivateCookieJar<'a> {
         let private_cookie_jar = cookie_jar.private(self.key);
         private_cookie_jar.get(name).map(Cookie)
     }
+
+    /// Returns cookie inside this jar with the name ignore the case and
+    /// authenticates and decrypts the cookie’s value, returning a Cookie
+    /// with the decrypted value. If the cookie cannot be found, or the
+    /// cookie fails to authenticate or decrypt, None is returned.
+    pub fn get_ignore_ascii_case(&self, name: &str) -> Option<Cookie> {
+        let cookie_jar = self.cookie_jar.jar.lock();
+        cookie_jar
+            .iter()
+            .find(|cookie| cookie.name().eq_ignore_ascii_case(name))
+            .and_then(|cookie| cookie_jar.private(self.key).decrypt(cookie.clone()))
+            .map(Cookie)
+    }
 }
 
 /// A child cookie jar that authenticates its cookies.
@@ -582,7 +663,7 @@ pub struct SignedCookieJar<'a> {
     cookie_jar: &'a CookieJar,
 }
 
-impl<'a> SignedCookieJar<'a> {
+impl SignedCookieJar<'_> {
     /// Adds cookie to the parent jar. The cookie’s value is signed assuring
     /// integrity and authenticity.
     pub fn add(&self, cookie: Cookie) {
@@ -595,7 +676,7 @@ impl<'a> SignedCookieJar<'a> {
     pub fn remove(&self, name: impl AsRef<str>) {
         let mut cookie_jar = self.cookie_jar.jar.lock();
         let mut signed_cookie_jar = cookie_jar.signed_mut(self.key);
-        signed_cookie_jar.remove(libcookie::Cookie::named(name.as_ref().to_string()));
+        signed_cookie_jar.remove(libcookie::Cookie::build(name.as_ref().to_string()));
     }
 
     /// Returns cookie inside this jar with the name and authenticates and
@@ -606,6 +687,19 @@ impl<'a> SignedCookieJar<'a> {
         let cookie_jar = self.cookie_jar.jar.lock();
         let signed_cookie_jar = cookie_jar.signed(self.key);
         signed_cookie_jar.get(name).map(Cookie)
+    }
+
+    /// Returns cookie inside this jar with the name ignore the case and
+    /// authenticates and decrypts the cookie’s value, returning a Cookie
+    /// with the decrypted value. If the cookie cannot be found, or the
+    /// cookie fails to authenticate or decrypt, None is returned.
+    pub fn get_ignore_ascii_case(&self, name: &str) -> Option<Cookie> {
+        let cookie_jar = self.cookie_jar.jar.lock();
+        cookie_jar
+            .iter()
+            .find(|cookie| cookie.name().eq_ignore_ascii_case(name))
+            .and_then(|cookie| cookie_jar.signed(self.key).verify(cookie.clone()))
+            .map(Cookie)
     }
 }
 

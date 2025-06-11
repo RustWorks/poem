@@ -3,7 +3,7 @@
 #![doc(html_favicon_url = "https://raw.githubusercontent.com/poem-web/poem/master/favicon.ico")]
 #![doc(html_logo_url = "https://raw.githubusercontent.com/poem-web/poem/master/logo.png")]
 #![forbid(unsafe_code)]
-#![deny(private_in_public, unreachable_pub)]
+#![deny(unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
@@ -20,7 +20,11 @@ pub mod service;
 pub mod codec;
 pub mod metadata;
 
+mod compression;
+mod connector;
 mod encoding;
+#[cfg(feature = "example_generated")]
+pub mod example_generated;
 mod health;
 mod reflection;
 mod request;
@@ -32,7 +36,8 @@ mod streaming;
 mod test_harness;
 
 pub use client::{ClientBuilderError, ClientConfig, ClientConfigBuilder};
-pub use health::{health_service, HealthReporter, ServingStatus};
+pub use compression::CompressionEncoding;
+pub use health::{HealthReporter, ServingStatus, health_service};
 pub use metadata::Metadata;
 pub use reflection::Reflection;
 pub use request::Request;

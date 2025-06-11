@@ -1,15 +1,15 @@
 use std::ops::{Deref, DerefMut};
 
-use base64::engine::{general_purpose::STANDARD, Engine};
+use base64::engine::{Engine, general_purpose::STANDARD};
 use bytes::Bytes;
 use futures_util::TryFutureExt;
 use poem::{IntoResponse, Request, RequestBody, Response, Result};
 
 use crate::{
+    ApiResponse,
     error::ParseRequestPayloadError,
     payload::{ParsePayload, Payload},
     registry::{MetaMediaType, MetaResponse, MetaResponses, MetaSchema, MetaSchemaRef, Registry},
-    ApiResponse,
 };
 
 /// A binary payload encoded with `base64`.
@@ -18,14 +18,14 @@ use crate::{
 ///
 /// ```rust
 /// use poem::{
+///     Body, IntoEndpoint, Request, Result,
 ///     error::BadRequest,
 ///     http::{Method, StatusCode, Uri},
 ///     test::TestClient,
-///     Body, IntoEndpoint, Request, Result,
 /// };
 /// use poem_openapi::{
-///     payload::{Base64, Json},
 ///     OpenApi, OpenApiService,
+///     payload::{Base64, Json},
 /// };
 /// use tokio::{io::AsyncReadExt, sync::Mutex};
 ///
@@ -93,7 +93,7 @@ impl<T: Send> Payload for Base64<T> {
                 && (content_type.subtype() == "plain"
                 || content_type
                     .suffix()
-                    .map_or(false, |v| v == "plain")))
+                    .is_some_and(|v| v == "plain")))
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -119,7 +119,6 @@ async fn read_base64(body: &mut RequestBody) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-#[poem::async_trait]
 impl ParsePayload for Base64<Vec<u8>> {
     const IS_REQUIRED: bool = true;
 
@@ -128,7 +127,6 @@ impl ParsePayload for Base64<Vec<u8>> {
     }
 }
 
-#[poem::async_trait]
 impl ParsePayload for Base64<Bytes> {
     const IS_REQUIRED: bool = true;
 
@@ -151,6 +149,7 @@ impl<T: AsRef<[u8]> + Send> ApiResponse for Base64<T> {
             responses: vec![MetaResponse {
                 description: "",
                 status: Some(200),
+                status_range: None,
                 content: vec![MetaMediaType {
                     content_type: Self::CONTENT_TYPE,
                     schema: Self::schema_ref(),

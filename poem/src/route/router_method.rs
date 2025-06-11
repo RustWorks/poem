@@ -1,6 +1,10 @@
+use std::future::Future;
+
+use futures_util::{FutureExt, future::Either};
+
 use crate::{
-    endpoint::BoxEndpoint, error::MethodNotAllowedError, http::Method, Endpoint, EndpointExt,
-    IntoEndpoint, Request, Response, Result,
+    Endpoint, EndpointExt, IntoEndpoint, Request, Response, Result, endpoint::BoxEndpoint,
+    error::MethodNotAllowedError, http::Method,
 };
 
 /// Routing object for HTTP methods
@@ -13,9 +17,8 @@ use crate::{
 ///
 /// ```
 /// use poem::{
-///     handler,
+///     Endpoint, Request, RouteMethod, handler,
 ///     http::{Method, StatusCode},
-///     Endpoint, Request, RouteMethod,
 /// };
 ///
 /// #[handler]
@@ -163,26 +166,31 @@ impl RouteMethod {
     }
 }
 
-#[async_trait::async_trait]
 impl Endpoint for RouteMethod {
     type Output = Response;
 
-    async fn call(&self, mut req: Request) -> Result<Self::Output> {
+    fn call(&self, mut req: Request) -> impl Future<Output = Result<Self::Output>> + Send {
         match self
             .methods
             .iter()
             .find(|(method, _)| method == req.method())
             .map(|(_, ep)| ep)
         {
-            Some(ep) => ep.call(req).await,
+            Some(ep) => Either::Left(ep.call(req)),
             None => {
                 if req.method() == Method::HEAD {
-                    req.set_method(Method::GET);
-                    let mut resp = self.call(req).await?;
-                    resp.set_body(());
-                    return Ok(resp);
+                    Either::Right(Either::Left(
+                        async move {
+                            req.set_method(Method::GET);
+                            let mut resp = self.call(req).await?;
+                            resp.set_body(());
+                            Ok(resp)
+                        }
+                        .boxed(),
+                    ))
+                } else {
+                    Either::Right(Either::Right(async { Err(MethodNotAllowedError.into()) }))
                 }
-                Err(MethodNotAllowedError.into())
             }
         }
     }
@@ -272,11 +280,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        handler,
-        http::{Method, StatusCode},
-        test::TestClient,
-    };
+    use crate::{handler, http::StatusCode, test::TestClient};
 
     #[tokio::test]
     async fn method_not_allowed() {

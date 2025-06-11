@@ -1,8 +1,8 @@
 use http::uri::Scheme;
 
 use crate::{
-    endpoint::BoxEndpoint, error::NotFoundError, Endpoint, EndpointExt, IntoEndpoint, Request,
-    Response,
+    Endpoint, EndpointExt, IntoEndpoint, Request, Response, endpoint::BoxEndpoint,
+    error::NotFoundError,
 };
 
 /// Routing object for request scheme
@@ -72,7 +72,6 @@ impl RouteScheme {
     }
 }
 
-#[async_trait::async_trait]
 impl Endpoint for RouteScheme {
     type Output = Response;
 

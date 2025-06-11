@@ -10,7 +10,7 @@ use std::{
 use headers::{ContentRange, HeaderMapExt};
 use http::{Extensions, Method};
 
-use crate::{http::StatusCode, IntoResponse, Response};
+use crate::{IntoResponse, Response, http::StatusCode};
 
 macro_rules! define_http_error {
     ($($(#[$docs:meta])* ($name:ident, $status:ident);)*) => {
@@ -35,9 +35,9 @@ pub trait ResponseError {
     where
         Self: StdError + Send + Sync + 'static,
     {
-        Response::builder()
-            .status(self.status())
-            .body(self.to_string())
+        let mut resp = self.to_string().into_response();
+        resp.set_status(self.status());
+        resp
     }
 }
 
@@ -67,7 +67,7 @@ type GetStatusFn = fn(&Error) -> StatusCode;
 enum AsResponse {
     Status(StatusCode),
     Fn(AsResponseFn, GetStatusFn),
-    Response(Response),
+    Response(Box<Response>),
 }
 
 impl AsResponse {
@@ -95,7 +95,7 @@ impl AsResponse {
 /// # Create from any error types
 ///
 /// ```
-/// use poem::{error::InternalServerError, handler, Result};
+/// use poem::{Result, error::InternalServerError, handler};
 ///
 /// #[handler]
 /// async fn index() -> Result<String> {
@@ -106,7 +106,7 @@ impl AsResponse {
 /// # Create you own error type
 ///
 /// ```
-/// use poem::{error::ResponseError, handler, http::StatusCode, Endpoint, Request, Result};
+/// use poem::{Endpoint, Request, Result, error::ResponseError, handler, http::StatusCode};
 ///
 /// #[derive(Debug, thiserror::Error)]
 /// #[error("my error")]
@@ -179,7 +179,7 @@ impl AsResponse {
 ///
 /// # Downcast the error to concrete error type
 /// ```
-/// use poem::{error::NotFoundError, Error};
+/// use poem::{Error, error::NotFoundError};
 ///
 /// let err: Error = NotFoundError.into();
 ///
@@ -214,6 +214,19 @@ impl Display for Error {
             #[cfg(feature = "eyre06")]
             Some(ErrorSource::Eyre06(err)) => Display::fmt(err, f),
             None => write!(f, "{}", self.status()),
+        }
+    }
+}
+
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match &self.source {
+            Some(ErrorSource::BoxedError(err)) => Some(err.as_ref()),
+            #[cfg(feature = "anyhow")]
+            Some(ErrorSource::Anyhow(err)) => Some(err.as_ref()),
+            #[cfg(feature = "eyre06")]
+            Some(ErrorSource::Eyre06(err)) => Some(err.as_ref()),
+            None => None,
         }
     }
 }
@@ -321,7 +334,7 @@ impl Error {
     /// Create a new error object from response.
     pub fn from_response(resp: Response) -> Self {
         Self {
-            as_response: AsResponse::Response(resp),
+            as_response: AsResponse::Response(Box::new(resp)),
             source: None,
             extensions: Extensions::default(),
             msg: None,
@@ -436,7 +449,7 @@ impl Error {
         let mut resp = match self.as_response {
             AsResponse::Status(status) => Response::builder().status(status).body(self.to_string()),
             AsResponse::Fn(ref f, _) => f(&self),
-            AsResponse::Response(resp) => resp,
+            AsResponse::Response(resp) => *resp,
         };
         *resp.extensions_mut() = self.extensions;
         resp
@@ -463,7 +476,7 @@ impl Error {
     /// assert_eq!(resp.data::<i32>(), Some(&100));
     /// ```
     #[inline]
-    pub fn set_data(&mut self, data: impl Send + Sync + 'static) {
+    pub fn set_data(&mut self, data: impl Clone + Send + Sync + 'static) {
         self.extensions.insert(data);
     }
 
@@ -689,7 +702,13 @@ pub enum ParseCookieError {
 
     /// Cookie value is illegal.
     #[error("cookie is illegal: {0}")]
+    #[cfg(not(feature = "sonic-rs"))]
     ParseJsonValue(#[from] serde_json::Error),
+
+    /// Cookie value is illegal.
+    #[error("cookie is illegal: {0}")]
+    #[cfg(feature = "sonic-rs")]
+    ParseJsonValue(#[from] sonic_rs::Error),
 }
 
 #[cfg(feature = "cookie")]
@@ -749,7 +768,13 @@ pub enum ParseJsonError {
 
     /// Url decode error.
     #[error("parse error: {0}")]
+    #[cfg(not(feature = "sonic-rs"))]
     Parse(#[from] serde_json::Error),
+
+    /// Url decode error.
+    #[error("parse error: {0}")]
+    #[cfg(feature = "sonic-rs")]
+    Parse(#[from] sonic_rs::Error),
 }
 
 impl ResponseError for ParseJsonError {
@@ -980,9 +1005,8 @@ impl ResponseError for StaticFileError {
     }
 
     fn as_response(&self) -> Response {
-        let mut resp = Response::builder()
-            .status(self.status())
-            .body(self.to_string());
+        let mut resp = self.to_string().into_response();
+        resp.set_status(self.status());
         if let StaticFileError::RangeNotSatisfiable { size } = self {
             resp.headers_mut()
                 .typed_insert(ContentRange::unsatisfied_bytes(*size));
@@ -1131,10 +1155,12 @@ mod tests {
             Ok::<_, NotFoundError>("hello").into_result(),
             Ok("hello")
         ));
-        assert!(Err::<String, _>(NotFoundError)
-            .into_result()
-            .unwrap_err()
-            .is::<NotFoundError>());
+        assert!(
+            Err::<String, _>(NotFoundError)
+                .into_result()
+                .unwrap_err()
+                .is::<NotFoundError>()
+        );
     }
 
     #[test]
@@ -1177,11 +1203,11 @@ mod tests {
         assert_eq!(err.into_response().status(), StatusCode::BAD_GATEWAY);
     }
 
-    #[cfg(feature = "eyre6")]
+    #[cfg(feature = "eyre06")]
     #[test]
-    fn test_eyre6_error() {
-        let eyre6_err: eyre6::Error = IoError::new(ErrorKind::AlreadyExists, "aaa").into();
-        let err: Error = Error::from((StatusCode::BAD_GATEWAY, eyre6_err));
+    fn test_eyre06_error() {
+        let eyre06_err: eyre06::Error = IoError::new(ErrorKind::AlreadyExists, "aaa").into();
+        let err: Error = Error::from((StatusCode::BAD_GATEWAY, eyre06_err));
         assert!(err.is::<IoError>());
         assert_eq!(
             err.downcast_ref::<IoError>().unwrap().kind(),

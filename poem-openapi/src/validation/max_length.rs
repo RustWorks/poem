@@ -6,7 +6,7 @@ use crate::{
 };
 
 #[derive(Display)]
-#[display(fmt = "maxLength({len})")]
+#[display("maxLength({len})")]
 pub struct MaxLength {
     len: usize,
 }
@@ -21,7 +21,7 @@ impl MaxLength {
 impl<T: AsRef<str>> Validator<T> for MaxLength {
     #[inline]
     fn check(&self, value: &T) -> bool {
-        value.as_ref().len() <= self.len
+        value.as_ref().chars().nth(self.len).is_none()
     }
 }
 

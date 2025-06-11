@@ -15,7 +15,7 @@
 //! # Quickstart
 //!
 //! ```no_run
-//! use poem::{get, handler, listener::TcpListener, web::Path, IntoResponse, Route, Server};
+//! use poem::{IntoResponse, Route, Server, get, handler, listener::TcpListener, web::Path};
 //!
 //! #[handler]
 //! fn hello(Path(name): Path<String>) -> String {
@@ -25,7 +25,7 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), std::io::Error> {
 //!     let app = Route::new().at("/hello/:name", get(hello));
-//!     Server::new(TcpListener::bind("127.0.0.1:3000"))
+//!     Server::new(TcpListener::bind("0.0.0.0:3000"))
 //!         .run(app)
 //!         .await
 //! }
@@ -40,8 +40,8 @@
 //!
 //! ```
 //! use poem::{
-//!     error::NotFoundError, handler, http::StatusCode, test::TestClient, Endpoint, Request,
-//!     Result,
+//!     Endpoint, Request, Result, error::NotFoundError, handler, http::StatusCode,
+//!     test::TestClient,
 //! };
 //!
 //! #[handler]
@@ -94,8 +94,8 @@
 //!
 //! ```
 //! use poem::{
-//!     error::ParseQueryError, handler, http::StatusCode, web::Query, IntoResponse, Response,
-//!     Result,
+//!     IntoResponse, Response, Result, error::ParseQueryError, handler, http::StatusCode,
+//!     web::Query,
 //! };
 //! use serde::Deserialize;
 //!
@@ -125,7 +125,7 @@
 //! - [`RouteMethod`] Routing for HTTP method
 //!
 //! ```
-//! use poem::{get, handler, post, web::Path, Route};
+//! use poem::{Route, get, handler, post, web::Path};
 //!
 //! #[handler]
 //! async fn get_user(id: Path<String>) {}
@@ -159,7 +159,7 @@
 //! The `result_response` function returns a `Result` type, which means that an
 //! error may occur.
 //! ```
-//! use poem::{handler, http::StatusCode, Result};
+//! use poem::{Result, handler, http::StatusCode};
 //!
 //! #[handler]
 //! fn string_response() -> String {
@@ -187,7 +187,7 @@
 //!
 //! ```
 //! use poem::{
-//!     error::NotFoundError, handler, http::StatusCode, EndpointExt, IntoResponse, Response, Route,
+//!     EndpointExt, IntoResponse, Response, Route, error::NotFoundError, handler, http::StatusCode,
 //! };
 //!
 //! #[handler]
@@ -213,7 +213,7 @@
 //! apply a middleware to an endpoint. It actually converts the original
 //! endpoint to a new endpoint.
 //! ```
-//! use poem::{handler, middleware::Tracing, EndpointExt, Route};
+//! use poem::{EndpointExt, Route, handler, middleware::Tracing};
 //!
 //! #[handler]
 //! fn index() {}
@@ -256,11 +256,12 @@
 //! | embed  | Integrate with [`rust-embed`](https://crates.io/crates/rust-embed) crate. |
 //! | xml | Integrate with [`quick-xml`](https://crates.io/crates/quick-xml) crate. |
 //! | yaml | Integrate with [`serde-yaml`](https://crates.io/crates/serde-yaml) crate.                   |
+//! |sonic-rs          | Uses [`sonic-rs`](https://github.com/cloudwego/sonic-rs) instead of `serde_json`. Pls, checkout `sonic-rs` requirements to properly enable `sonic-rs` capabilities |
 
 #![doc(html_favicon_url = "https://raw.githubusercontent.com/poem-web/poem/master/favicon.ico")]
 #![doc(html_logo_url = "https://raw.githubusercontent.com/poem-web/poem/master/logo.png")]
 #![forbid(unsafe_code)]
-#![deny(private_in_public, unreachable_pub)]
+#![deny(unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(rustdoc::broken_intra_doc_links)]
 #![warn(missing_docs)]
@@ -294,7 +295,6 @@ mod route;
 mod server;
 
 pub use addr::Addr;
-pub use async_trait::async_trait;
 pub use body::Body;
 pub use endpoint::{Endpoint, EndpointExt, IntoEndpoint};
 pub use error::{Error, Result};
@@ -303,8 +303,8 @@ pub use poem_derive::handler;
 pub use request::{OnUpgrade, Request, RequestBuilder, RequestParts, Upgraded};
 pub use response::{Response, ResponseBuilder, ResponseParts};
 pub use route::{
-    connect, delete, get, head, options, patch, post, put, trace, PathPattern, Route, RouteDomain,
-    RouteMethod, RouteScheme,
+    PathPattern, Route, RouteDomain, RouteMethod, RouteScheme, connect, delete, get, head, options,
+    patch, post, put, trace,
 };
 #[cfg(feature = "server")]
 pub use server::Server;

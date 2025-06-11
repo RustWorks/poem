@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 pub(crate) use de::PathDeserializer;
 use serde::de::DeserializeOwned;
 
-use crate::{error::ParsePathError, FromRequest, Request, RequestBody, Result};
+use crate::{FromRequest, Request, RequestBody, Result, error::ParsePathError};
 
 /// An extractor that will get captures from the URL and parse them using
 /// `serde`.
@@ -18,11 +18,10 @@ use crate::{error::ParsePathError, FromRequest, Request, RequestBody, Result};
 ///
 /// ```
 /// use poem::{
-///     get, handler,
+///     Endpoint, Request, Route, get, handler,
 ///     http::{StatusCode, Uri},
 ///     test::TestClient,
 ///     web::Path,
-///     Endpoint, Request, Route,
 /// };
 ///
 /// #[handler]
@@ -44,11 +43,10 @@ use crate::{error::ParsePathError, FromRequest, Request, RequestBody, Result};
 ///
 /// ```
 /// use poem::{
-///     get, handler,
+///     Endpoint, Request, Route, get, handler,
 ///     http::{StatusCode, Uri},
 ///     test::TestClient,
 ///     web::Path,
-///     Endpoint, Request, Route,
 /// };
 ///
 /// #[handler]
@@ -71,11 +69,10 @@ use crate::{error::ParsePathError, FromRequest, Request, RequestBody, Result};
 ///
 /// ```
 /// use poem::{
-///     get, handler,
+///     Endpoint, Request, Route, get, handler,
 ///     http::{StatusCode, Uri},
 ///     test::TestClient,
 ///     web::Path,
-///     Endpoint, Request, Route,
 /// };
 /// use serde::Deserialize;
 ///
@@ -125,7 +122,6 @@ impl<T: DeserializeOwned> Path<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a, T: DeserializeOwned> FromRequest<'a> for Path<T> {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Self::internal_from_request(req).await.map_err(Into::into)

@@ -1,18 +1,18 @@
-use std::{sync::Arc, time::Duration};
+use std::{borrow::Cow, sync::Arc, time::Duration};
 
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use libcsrf::{
     AesGcmCsrfProtection, CsrfCookie as RawCsrfCookie, CsrfProtection, CsrfToken as RawCsrfToken,
     UnencryptedCsrfCookie,
 };
 
 use crate::{
+    Endpoint, Middleware, Request, Result,
     middleware::{CookieJarManager, CookieJarManagerEndpoint},
     web::{
-        cookie::{Cookie, SameSite},
         CsrfToken, CsrfVerifier,
+        cookie::{Cookie, SameSite},
     },
-    Endpoint, Middleware, Request, Result,
 };
 
 /// Middleware for Cross-Site Request Forgery (CSRF) protection.
@@ -21,13 +21,12 @@ use crate::{
 ///
 /// ```
 /// use poem::{
-///     get, handler,
-///     http::{header, Method, StatusCode},
+///     Endpoint, EndpointExt, Error, Request, Result, Route, get, handler,
+///     http::{Method, StatusCode, header},
 ///     middleware::Csrf,
 ///     post,
 ///     test::TestClient,
-///     web::{cookie::Cookie, CsrfToken, CsrfVerifier},
-///     Endpoint, EndpointExt, Error, Request, Result, Route,
+///     web::{CsrfToken, CsrfVerifier, cookie::Cookie},
 /// };
 /// use serde::Deserialize;
 ///
@@ -83,6 +82,10 @@ pub struct Csrf {
     http_only: bool,
     same_site: Option<SameSite>,
     ttl: Duration,
+    // Using Arc<Cow<'static, _>> here because the path is most likely going
+    // to be a static str, and if it's not, we don't want to have to copy it
+    // into every endpoint.
+    path: Arc<Cow<'static, str>>,
 }
 
 impl Default for Csrf {
@@ -94,6 +97,7 @@ impl Default for Csrf {
             http_only: true,
             same_site: Some(SameSite::Strict),
             ttl: Duration::from_secs(24 * 60 * 60),
+            path: Arc::new(Cow::Borrowed("/")),
         }
     }
 }
@@ -104,13 +108,22 @@ impl Csrf {
         Default::default()
     }
 
+    /// Sets the name of the csrf cookie. Default is `poem-csrf-token`.
+    #[must_use]
+    pub fn cookie_name(self, value: impl Into<String>) -> Self {
+        Self {
+            cookie_name: value.into(),
+            ..self
+        }
+    }
+
     /// Sets AES256 key to provide signed, encrypted CSRF tokens and cookies.
     #[must_use]
     pub fn key(self, key: [u8; 32]) -> Self {
         Self { key, ..self }
     }
 
-    /// Sets the `Secure` to the csrf cookie. Default is `true`.
+    /// Sets, whether `Secure` is set for the csrf cookie. Defaults to `true`.
     #[must_use]
     pub fn secure(self, value: bool) -> Self {
         Self {
@@ -119,7 +132,7 @@ impl Csrf {
         }
     }
 
-    /// Sets the `HttpOnly` to the csrf cookie. Default is `true`.
+    /// Sets, whether `HttpOnly` is set for the csrf cookie. Defaults to `true`.
     #[must_use]
     pub fn http_only(self, value: bool) -> Self {
         Self {
@@ -128,12 +141,23 @@ impl Csrf {
         }
     }
 
-    /// Sets the `SameSite` to the csrf cookie. Default is
+    /// Sets, whether `SameSite` is set for the csrf cookie. Defaults to `true`.
     /// [`SameSite::Strict`](libcookie::SameSite::Strict).
     #[must_use]
     pub fn same_site(self, value: impl Into<Option<SameSite>>) -> Self {
         Self {
             same_site: value.into(),
+            ..self
+        }
+    }
+
+    /// Set the path for which the CSRF cookie should be set.
+    ///
+    /// By default, this is `"/"`.
+    #[must_use]
+    pub fn path(self, value: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            path: Arc::new(value.into()),
             ..self
         }
     }
@@ -161,11 +185,12 @@ impl<E: Endpoint> Middleware<E> for Csrf {
             http_only: self.http_only,
             same_site: self.same_site,
             ttl: self.ttl,
+            path: Arc::clone(&self.path),
         })
     }
 }
 
-/// Endpoint for Csrf middleware.
+/// Endpoint for the Csrf middleware.
 #[cfg_attr(docsrs, doc(cfg(feature = "csrf")))]
 pub struct CsrfEndpoint<E> {
     inner: E,
@@ -175,6 +200,7 @@ pub struct CsrfEndpoint<E> {
     http_only: bool,
     same_site: Option<SameSite>,
     ttl: Duration,
+    path: Arc<Cow<'static, str>>,
 }
 
 impl<E> CsrfEndpoint<E> {
@@ -199,7 +225,6 @@ impl<E> CsrfEndpoint<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: Endpoint> Endpoint for CsrfEndpoint<E> {
     type Output = E::Output;
 
@@ -218,6 +243,7 @@ impl<E: Endpoint> Endpoint for CsrfEndpoint<E> {
             cookie.set_http_only(self.http_only);
             cookie.set_same_site(self.same_site);
             cookie.set_max_age(self.ttl);
+            cookie.set_path(&**self.path);
             cookie
         };
 
@@ -233,10 +259,10 @@ impl<E: Endpoint> Endpoint for CsrfEndpoint<E> {
 
 #[cfg(test)]
 mod tests {
-    use http::{header, Method, StatusCode};
+    use http::{Method, StatusCode, header};
 
     use super::*;
-    use crate::{get, handler, EndpointExt, Error, IntoResponse, Result};
+    use crate::{EndpointExt, Error, IntoResponse, Result, get, handler};
 
     const CSRF_TOKEN_NAME: &str = "X-CSRF-Token";
 

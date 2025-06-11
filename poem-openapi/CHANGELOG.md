@@ -4,12 +4,186 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [5.1.15] 2025-06-06
+
+- Bump `derive_more` to `2.0`
+- Fix webhook nesting [#1031](https://github.com/poem-web/poem/pull/1031)
+- add support for num::NonZero [#1041](https://github.com/poem-web/poem/pull/1041)
+- Support deep linking in Swagger UI [#1049](https://github.com/poem-web/poem/pull/1049)
+- Add support to externally tagged unions [#1043](https://github.com/poem-web/poem/pull/1043)
+
+# [5.1.14] 2025-05-03
+
+- add scalar ui support [#1019](https://github.com/poem-web/poem/pull/1019)
+- support `Duration` and `Timestamp` from `prost_wkt_types` [#1016](https://github.com/poem-web/poem/pull/1016)
+- Object fields deprecation [#1026](https://github.com/poem-web/poem/pull/1026)
+- add support for server variables [#962](https://github.com/poem-web/poem/pull/962)
+
+# [5.1.12] 2025-03-30
+
+- the `Binary` type no longer requires `content-type` to be `application/octet-stream`.
+
+# [5.1.11] 2025-03-29
+
+- feat: `ignore_case` parameter in `OpenApi` macro can be used to operation.
+
+# [5.1.10] 2025-03-29
+
+- feat: add `ignore_case` parameter for `OpenApi` macro.
+
+# [5.1.9] 2025-03-24
+
+- fix(openapi): do not use `cookie` feature by default [#986](https://github.com/poem-web/poem/pull/986)
+- fix: guard cookie features behind feature toggle [#997](https://github.com/poem-web/poem/pull/997)
+- Support rename in NewType [#964](https://github.com/poem-web/poem/pull/964)
+- fix(openapi): exclude style parameter when serializing if none [#989](https://github.com/poem-web/poem/pull/989)
+- fix(poem-openapi): handle additional_properties correctly in flatten [#961](https://github.com/poem-web/poem/pull/961)
+- fix(poem-openapi-derive): Allow different path param names on same route [#952](https://github.com/poem-web/poem/pull/952)
+- Update MSRV to `1.85.0`
+
+# [5.1.6] 2025-02-21
+
+- Allows passing the style of a parameter in the openapi spec. [#940](https://github.com/poem-web/poem/pull/940)
+- Add support for Stoplight Elements [#954](https://github.com/poem-web/poem/pull/954)
+- Correct server object reference URL anchor [#957](https://github.com/poem-web/poem/pull/957)
+- feat(openapi): reflect fallback security scheme in spec [#958](https://github.com/poem-web/poem/pull/958)
+- Fix missing condition for Stoplight Elements UI [#972](https://github.com/poem-web/poem/pull/972)
+- Update MSRV to `1.83.0`
+
+# [5.1.5] 2025-01-04
+
+- Add description to Union descriminator object schema [#921](https://github.com/poem-web/poem/pull/921)
+- make Json from poem-openapi derive Default because Json from poem does [#938](https://github.com/poem-web/poem/pull/938)
+- Pass `ParsePayload<T>::IS_REQUIRED` to `T` instead of defaulting to `true` [#932](https://github.com/poem-web/poem/pull/932)
+- allow path in status for ApiResponse [#937](https://github.com/poem-web/poem/pull/937)
+
+# [5.1.4] 2024-11-25
+
+- Assign the description to the request object in OpenAPI [#886](https://github.com/poem-web/poem/pull/886)
+- Implemented nullable fields for openapi spec generation [#865](https://github.com/poem-web/poem/pull/865)
+- refactor: change type name delimiters from `<>` `()` `[]` to `_` [#904](https://github.com/poem-web/poem/pull/904)
+
+# [5.1.3] 2024-11-20
+
+- Update MSRV to `1.81.0`
+
+# [5.1.2] 2024-10-02
+
+- implements `Serialize` and `Deserialize` for `poem_openapi::types::Any<T>`.
+- add `ParseError::message method` to get the error message.
+
+# [5.1.1] 2024-09-13
+
+- fix [#883](https://github.com/poem-web/poem/issues/883)
+
+# [5.1.0] 2024-09-08
+
+- fix read_only_with_default test when only default features are enabled [#854](https://github.com/poem-web/poem/pulls)
+- feat: add AsyncSeek trait to Upload::into_async_read return type [#853](https://github.com/poem-web/poem/pull/853)
+- Added derivations for Type, ParseFromJSON and ToJSON for sqlx::types::Json<T>. [#833](https://github.com/poem-web/poem/pull/833)
+- chore(openapi): bump derive_more [#867](https://github.com/poem-web/poem/pull/867)
+
+# [5.0.3] 2024-07-27
+
+- Added derivations for Type, ParseFromJSON and ToJSON for sqlx types [#833](https://github.com/poem-web/poem/pull/833)
+
+# [5.0.1] 2024-05-18
+
+- Add enum_items to discriminated union [#741](https://github.com/poem-web/poem/pull/741)
+- fix Union doesn't implement IsObjectType [#800](https://github.com/poem-web/poem/issues/800)
+- fix Union doesn't support generics in the last version [#799](https://github.com/poem-web/poem/issues/799)
+- Expose Poem-OpenApi Upload File struct [#816](https://github.com/poem-web/poem/pull/816)
+
+# [5.0.0] 2024-03-30
+
+- use AFIT instead of `async_trait`
+- add `Upload::size` method
+- when `Union` uses discriminator, if the members is not an `Object`, an error will be reported at compile time
+
+# [4.0.1] 2024-03-04
+
+- added example value support for param/schema [#717](https://github.com/poem-web/poem/pull/717)
+- Adding serialize_with and deserialize_with attributes to struct fields [#749](https://github.com/poem-web/poem/pull/749)
+
+# [4.0.0] 2024-01-06
+
+- upgrade to `hyper1`
+- added documentation on how to merge API specs [#716](https://github.com/poem-web/poem/pull/716)
+- impl Type for std::time::Duration instead of only humantime::Duration [#713](https://github.com/poem-web/poem/pull/713)
+
+# [3.0.6] 2023-11-19
+
+- add [`prost-wkt-types` crate](https://crates.io/crates/prost-wkt-types) support [#689](https://github.com/poem-web/poem/pull/689)
+- add [`geo-types` crate](https://crates.io/crates/geo-types) support [#693](https://github.com/poem-web/poem/pull/693)
+- count string length correctly in OpenAPI validators [#666](https://github.com/poem-web/poem/pull/666)
+- Support for custom hash functions for HashMap/HashSet [#654](https://github.com/poem-web/poem/pull/654)
+- Misplaced `</html>`` in swagger_ui HTML template [#660](https://github.com/poem-web/poem/issues/660)
+- for `read-only` properties, can use `default` to specify a function for creating a default value. [#647](https://github.com/poem-web/poem/issues/647)
+
+```rust
+fn default_offset_datetime() -> OffsetDateTime {
+    OffsetDateTime::now_utc()
+}
+
+#[derive(Debug, Object, PartialEq)]
+struct Obj {
+    #[oai(read_only, default = "default_offset_datetime")]
+    time: OffsetDateTime,
+}
+```
+
+# [3.0.5] 2023-09-06
+
+- fixes [#648](https://github.com/poem-web/poem/issues/648)
+
+# [3.0.4] 2023-09-02
+
+- allow using expressions as `prefix_path` parameter [#635](https://github.com/poem-web/poem/issues/635)
+- bump `quick-xml` from `0.29.0` to `0.30.0`
+
+# [3.0.3] 2023-08-18
+
+- Add fallback support for `SecurityScheme` macro used on enums
+
+# [3.0.2] 2023-08-12
+
+- Add support for multiple authentication methods. [#627](https://github.com/poem-web/poem/discussions/627)
+
+## Breaking changes
+
+- change `fn ApiExtractor::security_schemes() -> Option<&str>` to `fn ApiExtractor::security_schemes() -> Vec<&str>`
+
+# [3.0.1] 2023-08-02
+
+- openapi: allows multiple security schemes on one operation [#621](https://github.com/poem-web/poem/issues/621)
+
+# [3.0.0] 2023-06-21
+
+- bump `syn` from `1.0` to `2.0`
+- bump `darling` from `0.14` to `0.20`
+- feat: introduce idle timeout [#603](https://github.com/poem-web/poem/pull/603)
+
+## Breaking Changes
+
+- Since `syn 2.0` no longer supports keywords as meta path, renamed some parameters in macros.
+
+    | Macro              | Old Name | New Name |
+    |--------------------|----------|----------|
+    | SecuritySchema     | type     | ty       |
+    | SecuritySchema     | in       | key_in   |
+    | ApiResponse.header | type     | ty       |
+
+    https://github.com/dtolnay/syn/issues/1458
+    https://github.com/TedDriggs/darling/issues/238
+
+- Change `ApiExtractor::TYPE` to `ApiExtractor::TYPES` to allow implementing multiple extractor in single type.
+
 # [2.0.27] 2023-06-06
 
 - feat: Implement Type on the char primitive [#518](https://github.com/poem-web/poem/pull/518)
 - Pattern matching in OpenAPI function args  [#517](https://github.com/poem-web/poem/pull/517)
 - chore: add Clone for `OpenApiService` [#527](https://github.com/poem-web/poem/pull/527)
-- Fix `#[derive(Multipart)]` for struct, so it will work with `#[derive(ApiRequest)]` #[551](https://github.com/poem-web/poem/pull/551)
+- Fix `#[derive(Multipart)]` for struct, so it will work with `#[derive(ApiRequest)]` [#551](https://github.com/poem-web/poem/pull/551)
 - feat: Allow more types to be prased into strings [#545](https://github.com/poem-web/poem/pull/545)
 - Support for ipnet crate + IpAddr [#544](https://github.com/poem-web/poem/pull/544)
 
@@ -305,7 +479,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [1.2.11] 2021-12-27
 
-- Remove the `OpenApi::combine` method, `OpenApiSerice::new` can be passed a tuple to combine multiple API objects.
+- Remove the `OpenApi::combine` method, `OpenApiService::new` can be passed a tuple to combine multiple API objects.
 
 # [1.2.10] 2021-12-26
 
@@ -427,7 +601,7 @@ enum UploadImageRequest {
 
 # [1.0.35] 2021-12-05
 
-- If a OpenAPI name conflict is detected when creating schema, it will cause panic.
+- If an OpenAPI name conflict is detected when creating schema, it will cause panic.
 
 # [1.0.33] 2021-11-30
 

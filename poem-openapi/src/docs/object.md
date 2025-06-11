@@ -1,4 +1,4 @@
-Define a OpenAPI object
+Define an OpenAPI object
 
 # Macro parameters
 
@@ -26,6 +26,7 @@ Define a OpenAPI object
 | default                      | Default value                                                                                                                                                                                                                                         | bool,string                               | Y        |
 | read_only                    | set field openapi readOnly property                                                                                                                                                                                                                   | bool                                      | Y        |
 | write_only                   | set field openapi writeOnly property bool                                                                                                                                                                                                             | bool                                      | Y        |
+| deprecated                   | Mark this field as deprecated                                                                                                                                                                                                                         | bool                                      | Y        |
 | flatten                      | Similar to serde (flatten)                                                                                                                                                                                                                            | bool                                      | Y        |
 | skip_serializing_if_is_none  | Skip serializing this field if the value is none.                                                                                                                                                                                                     | bool                                      | Y        |
 | skip_serializing_if_is_empty | Skip serializing this field if the value is empty.                                                                                                                                                                                                    | bool                                      | Y        |

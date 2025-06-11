@@ -21,9 +21,9 @@
     <img src="https://img.shields.io/badge/unsafe-forbidden-success.svg?style=flat-square"
       alt="Unsafe Rust forbidden" />
   </a>
-  <a href="https://blog.rust-lang.org/2022/09/22/Rust-1.64.0.html">
-    <img src="https://img.shields.io/badge/rustc-1.64.0+-ab6000.svg"
-      alt="rustc 1.64.0+" />
+  <a>
+    <img src="https://img.shields.io/badge/rustc-1.85.0+-ab6000.svg"
+      alt="rustc 1.85.0+" />
   </a>
   <a href="https://discord.gg/qWWNxwasb7">
     <img src="https://img.shields.io/discord/932986985604333638.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2" />
@@ -50,23 +50,28 @@ important business implementations.
 
 To avoid compiling unused dependencies, Poem gates certain features, some of which are disabled by default:
 
-| Feature          | Description                                                                      |
-|------------------|----------------------------------------------------------------------------------|
-| chrono           | Integrate with the [`chrono` crate](https://crates.io/crates/chrono).            |
-| time             | Integrate with the [`time` crate](https://crates.io/crates/time).                |
-| humantime        | Integrate with the [`humantime` crate](https://crates.io/crates/humantime)       |
-| openapi-explorer | Add OpenAPI Explorer support                                                           |
-| swagger-ui       | Add swagger UI support                                                           |
-| rapidoc          | Add RapiDoc UI support                                                           |
-| redoc            | Add Redoc UI support                                                             |
-| email            | Support for email address string                                                 |
-| hostname         | Support for hostname string                                                      |
-| uuid             | Integrate with the [`uuid` crate](https://crates.io/crates/uuid)                 |
-| url              | Integrate with the [`url` crate](https://crates.io/crates/url)                   |
-| bson             | Integrate with the [`bson` crate](https://crates.io/crates/bson)                 |
-| rust_decimal     | Integrate with the [`rust_decimal` crate](https://crates.io/crates/rust_decimal) |
-| static-files     | Support for static file response                                                 |
-| websocket        | Support for websocket                                                            |
+| Feature            | Description                                                                                                                                                        |
+|--------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| chrono             | Integrate with the [`chrono` crate](https://crates.io/crates/chrono).                                                                                              |
+| time               | Integrate with the [`time` crate](https://crates.io/crates/time).                                                                                                  |
+| humantime          | Integrate with the [`humantime` crate](https://crates.io/crates/humantime)                                                                                         |
+| openapi-explorer   | Add OpenAPI Explorer support                                                                                                                                       |
+| swagger-ui         | Add swagger UI support                                                                                                                                             |
+| rapidoc            | Add RapiDoc UI support                                                                                                                                             |
+| redoc              | Add Redoc UI support                                                                                                                                               |
+| scalar             | Add Scalar UI support                                                                                                                                              |
+| stoplight-elements | Add Stoplight Elements UI support                                                                                                                                  |
+| email              | Support for email address string                                                                                                                                   |
+| hostname           | Support for hostname string                                                                                                                                        |
+| uuid               | Integrate with the [`uuid` crate](https://crates.io/crates/uuid)                                                                                                   |
+| url                | Integrate with the [`url` crate](https://crates.io/crates/url)                                                                                                     |
+| geo                | Integrate with the [`geo-types` crate](https://crates.io/crates/geo-types)                                                                                         |
+| bson               | Integrate with the [`bson` crate](https://crates.io/crates/bson)                                                                                                   |
+| rust_decimal       | Integrate with the [`rust_decimal` crate](https://crates.io/crates/rust_decimal)                                                                                   |
+| prost-wkt-types    | Integrate with the [`prost-wkt-types` crate](https://crates.io/crates/prost-wkt-types)                                                                             |
+| static-files       | Support for static file response                                                                                                                                   |
+| websocket          | Support for websocket                                                                                                                                              |
+| sonic-rs           | Uses [`sonic-rs`](https://github.com/cloudwego/sonic-rs) instead of `serde_json`. Pls, checkout `sonic-rs` requirements to properly enable `sonic-rs` capabilities |
 
 ## Safety
 
@@ -98,7 +103,7 @@ async fn main() -> Result<(), std::io::Error> {
     let ui = api_service.swagger_ui();
     let app = Route::new().nest("/api", api_service).nest("/", ui);
 
-    poem::Server::new(TcpListener::bind("127.0.0.1:3000"))
+    poem::Server::new(TcpListener::bind("0.0.0.0:3000"))
         .run(app)
         .await
 }
@@ -107,8 +112,8 @@ async fn main() -> Result<(), std::io::Error> {
 This feature needs to be opted-in. It can be done by adding the feature in `Cargo.toml` file
 ```toml filename=Cargo.toml
 [dependencies]
-poem = "1"
-poem-openapi = { version = "2", features = ["swagger-ui"]}
+poem = "3"
+poem-openapi = { version = "5", features = ["swagger-ui"]}
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -119,16 +124,16 @@ Open `http://localhost:3000/` in your browser, you will see the `Swagger UI` tha
 ```shell
 > cargo run --example hello_world
 
-> curl http://localhost:3000
+> curl http://localhost:3000/api/hello
 hello!
 
-> curl http://localhost:3000\?name\=sunli
+> curl http://localhost:3000/api/hello?name=sunli
 hello, sunli!        
 ```
 
 ## MSRV
 
-The minimum supported Rust version for this crate is `1.64.0`.
+The minimum supported Rust version for this crate is `1.83.0`.
 
 ## Contributing
 

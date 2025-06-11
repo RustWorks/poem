@@ -22,7 +22,7 @@ impl Type for Uri {
     type RawElementValueType = Self;
 
     fn name() -> Cow<'static, str> {
-        "string(uri)".into()
+        "string_uri".into()
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -57,7 +57,6 @@ impl ParseFromParameter for Uri {
     }
 }
 
-#[poem::async_trait]
 impl ParseFromMultipartField for Uri {
     async fn parse_from_multipart(field: Option<Field>) -> ParseResult<Self> {
         match field {

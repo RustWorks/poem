@@ -1,12 +1,12 @@
 use std::{collections::HashMap, sync::Mutex};
 
 use futures_util::StreamExt;
-use poem::{endpoint::BoxEndpoint, IntoEndpoint};
+use poem::{IntoEndpoint, endpoint::BoxEndpoint};
 use tokio::sync::watch::{Receiver, Sender};
 
 use crate::{Code, Request, Response, Service, Status, Streaming};
 
-#[allow(private_in_public, unreachable_pub)]
+#[allow(unreachable_pub)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 mod proto {
     include!(concat!(env!("OUT_DIR"), "/grpc.health.v1.rs"));
@@ -70,7 +70,6 @@ impl HealthReporter {
     }
 }
 
-#[poem::async_trait]
 impl proto::Health for HealthService {
     async fn check(
         &self,

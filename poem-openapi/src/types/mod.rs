@@ -10,7 +10,7 @@ mod string_types;
 
 pub mod multipart;
 
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, future::Future, sync::Arc};
 
 pub use any::Any;
 pub use base64_type::Base64;
@@ -27,7 +27,7 @@ pub use string_types::Password;
 
 use crate::registry::{MetaSchemaRef, Registry};
 
-/// Represents a OpenAPI type.
+/// Represents an OpenAPI type.
 pub trait Type: Send + Sync {
     /// If it is `true`, it means that this type is required.
     const IS_REQUIRED: bool;
@@ -81,6 +81,9 @@ pub trait Type: Send + Sync {
         false
     }
 }
+
+/// Represents a object type.
+pub trait IsObjectType: Type {}
 
 /// Represents a type that can parsing from JSON.
 pub trait ParseFromJSON: Sized + Type {
@@ -138,14 +141,18 @@ pub trait ParseFromParameter: Sized + Type {
 }
 
 /// Represents a type that can parsing from multipart.
-#[poem::async_trait]
 pub trait ParseFromMultipartField: Sized + Type {
     /// Parse from multipart field.
-    async fn parse_from_multipart(field: Option<PoemField>) -> ParseResult<Self>;
+    fn parse_from_multipart(
+        field: Option<PoemField>,
+    ) -> impl Future<Output = ParseResult<Self>> + Send;
 
     /// Parse from repeated multipart field.
-    async fn parse_from_repeated_field(self, _field: PoemField) -> ParseResult<Self> {
-        Err(ParseError::<Self>::custom("repeated field"))
+    fn parse_from_repeated_field(
+        self,
+        _field: PoemField,
+    ) -> impl Future<Output = ParseResult<Self>> + Send {
+        async move { Err(ParseError::<Self>::custom("repeated field")) }
     }
 }
 
@@ -380,7 +387,6 @@ impl<T: ParseFromParameter> ParseFromParameter for Box<T> {
     }
 }
 
-#[poem::async_trait]
 impl<T: ParseFromMultipartField> ParseFromMultipartField for Box<T> {
     async fn parse_from_multipart(field: Option<PoemField>) -> ParseResult<Self> {
         T::parse_from_multipart(field)
@@ -435,7 +441,7 @@ mod tests {
     #[allow(clippy::assertions_on_constants)]
     fn arc_type() {
         assert!(Arc::<i32>::IS_REQUIRED);
-        assert_eq!(Arc::<i32>::name(), "integer(int32)");
+        assert_eq!(Arc::<i32>::name(), "integer_int32");
         assert_eq!(Arc::new(100).as_raw_value(), Some(&100));
 
         let value: Arc<i32> =
@@ -463,9 +469,10 @@ mod tests {
 
     #[test]
     #[allow(clippy::assertions_on_constants)]
+    #[allow(unused_allocation)]
     fn box_type() {
         assert!(Box::<i32>::IS_REQUIRED);
-        assert_eq!(Box::<i32>::name(), "integer(int32)");
+        assert_eq!(Box::<i32>::name(), "integer_int32");
         assert_eq!(Box::new(100).as_raw_value(), Some(&100));
 
         let value: Box<i32> =

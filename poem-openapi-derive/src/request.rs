@@ -1,9 +1,9 @@
 use std::str::FromStr;
 
 use darling::{
+    FromDeriveInput, FromVariant,
     ast::{Data, Fields},
     util::{Ignored, SpannedValue},
-    FromDeriveInput, FromVariant,
 };
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
@@ -44,7 +44,9 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
     let e = match &args.data {
         Data::Enum(e) => e,
         _ => {
-            return Err(Error::new_spanned(ident, "Request can only be applied to an enum.").into())
+            return Err(
+                Error::new_spanned(ident, "Request can only be applied to an enum.").into(),
+            );
         }
     };
     let description = get_description(&args.attrs)?;
@@ -108,16 +110,15 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
             _ => {
                 return Err(
                     Error::new_spanned(&variant.ident, "Incorrect request definition.").into(),
-                )
+                );
             }
         }
     }
 
     let expanded = {
         quote! {
-            #[#crate_name::__private::poem::async_trait]
             impl #impl_generics #crate_name::ApiExtractor<'__request> for #ident #ty_generics #where_clause {
-                const TYPE: #crate_name::ApiExtractorType = #crate_name::ApiExtractorType::RequestObject;
+                const TYPES: &'static [#crate_name::ApiExtractorType] = &[#crate_name::ApiExtractorType::RequestObject];
 
                 type ParamType = ();
                 type ParamRawType = ();

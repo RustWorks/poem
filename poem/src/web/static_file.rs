@@ -12,13 +12,13 @@ use headers::{
     ContentRange, ETag, HeaderMapExt, IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince,
     Range,
 };
-use http::{header, StatusCode};
+use http::{StatusCode, header};
 use httpdate::HttpDate;
 use mime::Mime;
 use tokio::{fs::File, io::AsyncReadExt};
 
 use crate::{
-    error::StaticFileError, Body, FromRequest, IntoResponse, Request, RequestBody, Response, Result,
+    Body, FromRequest, IntoResponse, Request, RequestBody, Response, Result, error::StaticFileError,
 };
 
 /// A response for static file extractor.
@@ -38,6 +38,8 @@ pub enum StaticFileResponse {
         last_modified: Option<String>,
         /// `Content-Range` header value
         content_range: Option<(std::ops::Range<u64>, u64)>,
+        /// `Cache-Control` header value
+        cache_control: Option<String>,
     },
     /// 304 NOT MODIFIED
     NotModified,
@@ -63,6 +65,7 @@ impl IntoResponse for StaticFileResponse {
                 etag,
                 last_modified,
                 content_range,
+                cache_control,
             } => {
                 let mut builder = Response::builder()
                     .header(header::ACCEPT_RANGES, "bytes")
@@ -77,11 +80,13 @@ impl IntoResponse for StaticFileResponse {
                 if let Some(last_modified) = last_modified {
                     builder = builder.header(header::LAST_MODIFIED, last_modified);
                 }
-
                 if let Some((range, size)) = content_range {
                     builder = builder
                         .status(StatusCode::PARTIAL_CONTENT)
                         .typed_header(ContentRange::bytes(range, size).unwrap());
+                }
+                if let Some(cache_control) = cache_control {
+                    builder = builder.header(header::CACHE_CONTROL, cache_control);
                 }
 
                 builder.body(body)
@@ -101,7 +106,6 @@ pub struct StaticFileRequest {
     range: Option<Range>,
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for StaticFileRequest {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(Self {
@@ -115,10 +119,7 @@ impl<'a> FromRequest<'a> for StaticFileRequest {
 }
 
 impl StaticFileRequest {
-    /// Create static file response.
-    ///
-    /// `prefer_utf8` - Specifies whether text responses should signal a UTF-8
-    /// encoding.
+    /// Create static file response from bytes.
     pub fn create_response_from_data(
         self,
         data: impl AsRef<[u8]>,
@@ -129,7 +130,10 @@ impl StaticFileRequest {
         let mut content_length = data.len() as u64;
         let mut content_range = None;
 
-        let body = if let Some((start, end)) = self.range.and_then(|range| range.iter().next()) {
+        let body = if let Some((start, end)) = self
+            .range
+            .and_then(|range| range.satisfiable_ranges(data.len() as u64).next())
+        {
             let start = match start {
                 Bound::Included(n) => n,
                 Bound::Excluded(n) => n + 1,
@@ -165,17 +169,23 @@ impl StaticFileRequest {
             etag: None,
             last_modified: None,
             content_range,
+            cache_control: None,
         })
     }
 
     /// Create static file response.
     ///
-    /// `prefer_utf8` - Specifies whether text responses should signal a UTF-8
-    /// encoding.
+    /// # Arguments
+    ///
+    /// * `prefer_utf8` - Specifies whether text responses should signal a UTF-8
+    ///   encoding.
+    /// * `no_cache` - Specifies whether to set the `Cache-Control` header to
+    ///   `no-cache`.
     pub fn create_response(
         self,
         path: impl AsRef<Path>,
         prefer_utf8: bool,
+        no_cache: bool,
     ) -> Result<StaticFileResponse, StaticFileError> {
         let path = path.as_ref();
         if !path.exists() || !path.is_file() {
@@ -232,7 +242,10 @@ impl StaticFileRequest {
 
         let mut content_range = None;
 
-        let body = if let Some((start, end)) = self.range.and_then(|range| range.iter().next()) {
+        let body = if let Some((start, end)) = self
+            .range
+            .and_then(|range| range.satisfiable_ranges(metadata.len()).next())
+        {
             let start = match start {
                 Bound::Included(n) => n,
                 Bound::Excluded(n) => n + 1,
@@ -275,6 +288,11 @@ impl StaticFileRequest {
                 None
             },
             content_range,
+            cache_control: if no_cache {
+                Some("no-cache".to_string())
+            } else {
+                None
+            },
         })
     }
 }
@@ -378,7 +396,7 @@ mod tests {
         let static_file = StaticFileRequest::from_request_without_body(&req)
             .await
             .unwrap();
-        static_file.create_response(Path::new("Cargo.toml"), false)
+        static_file.create_response(Path::new("Cargo.toml"), false, false)
     }
 
     #[tokio::test]
@@ -503,7 +521,7 @@ mod tests {
         .await
         .unwrap();
         let resp = static_file
-            .create_response(Path::new("Cargo.toml"), false)
+            .create_response(Path::new("Cargo.toml"), false, false)
             .unwrap();
         match resp {
             StaticFileResponse::Ok { content_range, .. } => {
@@ -525,7 +543,7 @@ mod tests {
         .await
         .unwrap();
         let resp = static_file
-            .create_response(Path::new("Cargo.toml"), false)
+            .create_response(Path::new("Cargo.toml"), false, false)
             .unwrap();
         match resp {
             StaticFileResponse::Ok { content_range, .. } => {
@@ -547,11 +565,42 @@ mod tests {
         .await
         .unwrap();
         let err = static_file
-            .create_response(Path::new("Cargo.toml"), false)
+            .create_response(Path::new("Cargo.toml"), false, false)
             .unwrap_err();
 
         match err {
             StaticFileError::RangeNotSatisfiable { size } => assert_eq!(size, md.len()),
+            _ => panic!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cache_control() {
+        let static_file = StaticFileRequest::from_request_without_body(&Request::default())
+            .await
+            .unwrap();
+        let resp = static_file
+            .create_response(Path::new("Cargo.toml"), false, false)
+            .unwrap();
+
+        match resp {
+            StaticFileResponse::Ok { cache_control, .. } => {
+                assert_eq!(cache_control, None)
+            }
+            _ => panic!(),
+        }
+
+        let static_file = StaticFileRequest::from_request_without_body(&Request::default())
+            .await
+            .unwrap();
+        let resp = static_file
+            .create_response(Path::new("Cargo.toml"), false, true)
+            .unwrap();
+
+        match resp {
+            StaticFileResponse::Ok { cache_control, .. } => {
+                assert_eq!(cache_control, Some("no-cache".to_string()))
+            }
             _ => panic!(),
         }
     }

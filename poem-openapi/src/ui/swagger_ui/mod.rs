@@ -1,4 +1,4 @@
-use poem::{endpoint::make_sync, web::Html, Endpoint};
+use poem::{Endpoint, endpoint::make_sync, web::Html};
 
 const SWAGGER_UI_JS: &str = include_str!("swagger-ui-bundle.js");
 const SWAGGER_UI_CSS: &str = include_str!("swagger-ui.css");
@@ -12,7 +12,6 @@ const SWAGGER_UI_TEMPLATE: &str = r#"
     <style charset="UTF-8">{:style}</style>
     <script charset="UTF-8">{:script}</script>
 </head>
-</html>
 <body>
 
 <div id="ui"></div>
@@ -37,10 +36,12 @@ const SWAGGER_UI_TEMPLATE: &str = r#"
         spec: spec,
         filter: false,
         oauth2RedirectUrl: oauth2RedirectUrl,
+        deepLinking: true,
     })
 </script>
 
 </body>
+</html>
 "#;
 
 pub(crate) fn create_html(document: &str) -> String {
@@ -50,8 +51,8 @@ pub(crate) fn create_html(document: &str) -> String {
         .replace("{:spec}", document)
 }
 
-pub(crate) fn create_endpoint(document: &str) -> impl Endpoint {
-    let ui_html = create_html(document);
+pub(crate) fn create_endpoint(document: String) -> impl Endpoint {
+    let ui_html = create_html(&document);
     poem::Route::new()
         .at("/", make_sync(move |_| Html(ui_html.clone())))
         .at(

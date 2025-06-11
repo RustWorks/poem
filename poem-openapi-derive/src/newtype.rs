@@ -1,14 +1,14 @@
 use darling::{
+    FromDeriveInput,
     ast::{Data, Style},
     util::Ignored,
-    FromDeriveInput,
 };
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::{Attribute, DeriveInput, Error, Generics, Type};
 
 use crate::{
-    common_args::ExternalDocument,
+    common_args::{ExternalDocument, LitOrPath},
     error::GeneratorResult,
     utils::{
         get_crate_name, get_summary_and_description, optional_literal, optional_literal_string,
@@ -39,6 +39,8 @@ struct NewTypeArgs {
     external_docs: Option<ExternalDocument>,
     #[darling(default)]
     example: bool,
+    #[darling(default)]
+    rename: Option<LitOrPath<String>>,
 }
 
 const fn default_true() -> bool {
@@ -59,7 +61,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
         _ => {
             return Err(
                 Error::new_spanned(ident, "NewType can only be applied to an struct.").into(),
-            )
+            );
         }
     };
 
@@ -88,6 +90,18 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
         }
     } else {
         quote!(None)
+    };
+
+    let name = match args.rename {
+        Some(LitOrPath::Lit(name)) => quote! {
+            ::std::borrow::Cow::from(#name)
+        },
+        Some(LitOrPath::Path(path)) => quote! {
+            ::std::borrow::Cow::from(#path)
+        },
+        None => quote! {
+            <#inner_ty as #crate_name::types::Type>::name()
+        },
     };
 
     let schema_ref = quote! {
@@ -135,7 +149,6 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
 
     let from_multipart = if args.from_multipart {
         Some(quote! {
-            #[#crate_name::__private::poem::async_trait]
             impl #impl_generics #crate_name::types::ParseFromMultipartField for #ident #ty_generics #where_clause {
                 async fn parse_from_multipart(field: ::std::option::Option<#crate_name::__private::poem::web::Field>) -> #crate_name::types::ParseResult<Self> {
                     let value = ::std::result::Result::map_err(<#inner_ty as #crate_name::types::ParseFromMultipartField>::parse_from_multipart(field).await, poem_openapi::types::ParseError::propagate)?;
@@ -183,7 +196,7 @@ pub(crate) fn generate(args: DeriveInput) -> GeneratorResult<TokenStream> {
             type RawElementValueType = <#inner_ty as #crate_name::types::Type>::RawElementValueType;
 
             fn name() -> ::std::borrow::Cow<'static, str> {
-                <#inner_ty as #crate_name::types::Type>::name()
+                #name
             }
 
             fn schema_ref() -> #crate_name::registry::MetaSchemaRef {

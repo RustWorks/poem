@@ -5,6 +5,7 @@ use crate::{
 };
 
 /// Used to extract the Api Key from the request.
+#[derive(Debug)]
 pub struct ApiKey {
     /// Api key
     pub key: String,
@@ -31,6 +32,7 @@ impl ApiKeyAuthorization for ApiKey {
                     key: value.to_string(),
                 })
                 .ok_or_else(|| AuthorizationError.into()),
+            #[cfg(feature = "cookie")]
             MetaParamIn::Cookie => req
                 .cookie()
                 .get(name)

@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
-use http::{header::HeaderName, HeaderMap};
+use http::{HeaderMap, header::HeaderName};
 
 use crate::{Endpoint, IntoResponse, Middleware, Request, Response, Result};
 
-/// Middleware for propagate a header from the request to the response.
+/// Middleware to propagate a header from the request to the response.
 #[derive(Default)]
 pub struct PropagateHeader {
     headers: HashSet<HeaderName>,
@@ -41,13 +41,12 @@ impl<E: Endpoint> Middleware<E> for PropagateHeader {
     }
 }
 
-/// Endpoint for PropagateHeader middleware.
+/// Endpoint for the PropagateHeader middleware.
 pub struct PropagateHeaderEndpoint<E> {
     inner: E,
     headers: HashSet<HeaderName>,
 }
 
-#[async_trait::async_trait]
 impl<E: Endpoint> Endpoint for PropagateHeaderEndpoint<E> {
     type Output = Response;
 
@@ -69,7 +68,7 @@ impl<E: Endpoint> Endpoint for PropagateHeaderEndpoint<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{handler, test::TestClient, EndpointExt};
+    use crate::{EndpointExt, handler, test::TestClient};
 
     #[tokio::test]
     async fn test_propagate_header() {

@@ -3,10 +3,10 @@ use std::ops::{Deref, DerefMut};
 use poem::{FromRequest, IntoResponse, Request, RequestBody, Response, Result};
 
 use crate::{
+    ApiResponse,
     payload::{ParsePayload, Payload},
     registry::{MetaMediaType, MetaResponse, MetaResponses, MetaSchemaRef, Registry},
     types::Type,
-    ApiResponse,
 };
 
 /// A UTF8 html payload.
@@ -35,7 +35,7 @@ impl<T: Send> Payload for Html<T> {
                 && (content_type.subtype() == "html"
                 || content_type
                     .suffix()
-                    .map_or(false, |v| v == "html")))
+                    .is_some_and(|v| v == "html")))
     }
 
     fn schema_ref() -> MetaSchemaRef {
@@ -43,7 +43,6 @@ impl<T: Send> Payload for Html<T> {
     }
 }
 
-#[poem::async_trait]
 impl ParsePayload for Html<String> {
     const IS_REQUIRED: bool = true;
 
@@ -64,6 +63,7 @@ impl<T: Into<String> + Send> ApiResponse for Html<T> {
             responses: vec![MetaResponse {
                 description: "",
                 status: Some(200),
+                status_range: None,
                 content: vec![MetaMediaType {
                     content_type: Self::CONTENT_TYPE,
                     schema: Self::schema_ref(),

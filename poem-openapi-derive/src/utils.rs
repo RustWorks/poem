@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
-use darling::{util::SpannedValue, FromMeta};
+use darling::{FromMeta, util::SpannedValue};
+use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Ident, Span, TokenStream};
-use proc_macro_crate::{crate_name, FoundCrate};
 use quote::quote;
 use syn::{
-    visit_mut, visit_mut::VisitMut, Attribute, Error, GenericParam, Generics, Lifetime, Lit, Meta,
-    Result,
+    Attribute, Error, Expr, ExprLit, GenericParam, Generics, Lifetime, Lit, Meta, Result,
+    visit_mut, visit_mut::VisitMut,
 };
 
 use crate::error::GeneratorResult;
@@ -27,9 +27,12 @@ pub(crate) fn get_crate_name(internal: bool) -> TokenStream {
 pub(crate) fn get_description(attrs: &[Attribute]) -> Result<Option<String>> {
     let mut full_docs = String::new();
     for attr in attrs {
-        if attr.path.is_ident("doc") {
-            if let Meta::NameValue(nv) = attr.parse_meta()? {
-                if let Lit::Str(doc) = nv.lit {
+        if attr.path().is_ident("doc") {
+            if let Meta::NameValue(nv) = &attr.meta {
+                if let Expr::Lit(ExprLit {
+                    lit: Lit::Str(doc), ..
+                }) = &nv.value
+                {
                     let doc = doc.value();
                     let doc_str = doc.trim();
                     if !full_docs.is_empty() {
@@ -48,7 +51,7 @@ pub(crate) fn get_description(attrs: &[Attribute]) -> Result<Option<String>> {
 }
 
 pub(crate) fn remove_description(attrs: &mut Vec<Attribute>) {
-    attrs.retain(|attr| !attr.path.is_ident("doc"));
+    attrs.retain(|attr| !attr.path().is_ident("doc"));
 }
 
 pub(crate) fn get_summary_and_description(
@@ -91,7 +94,7 @@ pub(crate) fn remove_oai_attrs(attrs: &mut Vec<Attribute>) {
     if let Some((idx, _)) = attrs
         .iter()
         .enumerate()
-        .find(|(_, a)| a.path.is_ident("oai"))
+        .find(|(_, a)| a.path().is_ident("oai"))
     {
         attrs.remove(idx);
     }
@@ -99,49 +102,22 @@ pub(crate) fn remove_oai_attrs(attrs: &mut Vec<Attribute>) {
 
 pub(crate) fn parse_oai_attrs<T: FromMeta>(attrs: &[Attribute]) -> GeneratorResult<Option<T>> {
     for attr in attrs {
-        if attr.path.is_ident("oai") {
-            let meta = attr.parse_meta()?;
-            return Ok(Some(T::from_meta(&meta)?));
+        if attr.path().is_ident("oai") {
+            return Ok(Some(T::from_meta(&attr.meta)?));
         }
     }
     Ok(None)
 }
 
-pub(crate) fn convert_oai_path<'a, 'b: 'a>(
-    path: &'a SpannedValue<String>,
-    prefix_path: &'b Option<SpannedValue<String>>,
-) -> Result<(String, String)> {
+pub(crate) fn convert_oai_path(path: &SpannedValue<String>) -> Result<(String, String)> {
     if !path.starts_with('/') {
         return Err(Error::new(path.span(), "The path must start with '/'."));
     }
 
     let mut oai_path = String::new();
     let mut new_path = String::new();
-
-    if let Some(prefix_path) = prefix_path {
-        handle_path(prefix_path, &mut oai_path, &mut new_path)?;
-    }
-
-    handle_path(path, &mut oai_path, &mut new_path)?;
-
-    if oai_path.is_empty() {
-        oai_path += "/";
-    }
-
-    if new_path.is_empty() {
-        new_path += "/";
-    }
-
-    Ok((oai_path, new_path))
-}
-
-#[allow(clippy::needless_lifetimes)]
-fn handle_path<'a>(
-    path: &'a SpannedValue<String>,
-    oai_path: &mut String,
-    new_path: &mut String,
-) -> Result<()> {
     let mut vars = HashSet::new();
+    let mut param_count = 0;
 
     for s in path.split('/') {
         if s.is_empty() {
@@ -154,7 +130,8 @@ fn handle_path<'a>(
             oai_path.push('}');
 
             new_path.push_str("/:");
-            new_path.push_str(var);
+            new_path.push_str(&format!("param{param_count}"));
+            param_count += 1;
 
             if !vars.insert(var) {
                 return Err(Error::new(
@@ -170,7 +147,16 @@ fn handle_path<'a>(
             new_path.push_str(s);
         }
     }
-    Ok(())
+
+    if oai_path.is_empty() {
+        oai_path += "/";
+    }
+
+    if new_path.is_empty() {
+        new_path += "/";
+    }
+
+    Ok((oai_path, new_path))
 }
 
 pub(crate) struct RemoveLifetime;
@@ -207,15 +193,22 @@ pub(crate) fn create_object_name(
             use ::std::convert::From;
             let mut name = ::std::string::String::from(#name);
 
-            name.push('<');
+            name.push('_');
             name.push_str(&<#first as #crate_name::types::Type>::name());
             #(
-                name.push_str(", ");
+                name.push_str("_");
                 name.push_str(&<#tail as #crate_name::types::Type>::name());
             )*
-            name.push('>');
 
             name
         })
+    }
+}
+
+pub(crate) fn preserve_str_literal(meta: &Meta) -> darling::Result<Option<Expr>> {
+    match meta {
+        Meta::Path(_) => Err(darling::Error::unsupported_format("path").with_span(meta)),
+        Meta::List(_) => Err(darling::Error::unsupported_format("list").with_span(meta)),
+        Meta::NameValue(nv) => Ok(Some(nv.value.clone())),
     }
 }

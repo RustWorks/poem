@@ -5,7 +5,7 @@ use std::{
 };
 
 use parking_lot::RwLock;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::{FromRequest, Request, RequestBody, Result};
@@ -147,7 +147,6 @@ impl Session {
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for &'a Session {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Ok(req

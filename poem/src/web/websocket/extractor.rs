@@ -1,17 +1,17 @@
 use std::{borrow::Cow, future::Future};
 
-use futures_util::{future::BoxFuture, FutureExt};
+use futures_util::{FutureExt, future::BoxFuture};
 use headers::HeaderMapExt;
-use tokio_tungstenite::tungstenite::protocol::Role;
+use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 
-use super::{utils::sign, WebSocketStream};
+use super::{WebSocketStream, utils::sign};
 use crate::{
+    Body, FromRequest, IntoResponse, OnUpgrade, Request, RequestBody, Response, Result,
     error::WebSocketError,
     http::{
-        header::{self, HeaderValue},
         Method, StatusCode,
+        header::{self, HeaderValue},
     },
-    Body, FromRequest, IntoResponse, OnUpgrade, Request, RequestBody, Response, Result,
 };
 
 /// An extractor that can accept websocket connections.
@@ -24,12 +24,17 @@ pub struct WebSocket {
     on_upgrade: OnUpgrade,
     protocols: Option<Box<[Cow<'static, str>]>>,
     sec_websocket_protocol: Option<HeaderValue>,
+    config: Option<WebSocketConfig>,
 }
 
 impl WebSocket {
     async fn internal_from_request(req: &Request) -> Result<Self, WebSocketError> {
+        let is_valid_upgrade_header = req.headers().get(header::UPGRADE)
+            == Some(&HeaderValue::from_static("websocket"))
+            || req.headers().get(header::UPGRADE) == Some(&HeaderValue::from_static("WebSocket"));
+
         if req.method() != Method::GET
-            || req.headers().get(header::UPGRADE) != Some(&HeaderValue::from_static("websocket"))
+            || !is_valid_upgrade_header
             || req.headers().get(header::SEC_WEBSOCKET_VERSION)
                 != Some(&HeaderValue::from_static("13"))
         {
@@ -58,11 +63,11 @@ impl WebSocket {
             on_upgrade: req.take_upgrade()?,
             protocols: None,
             sec_websocket_protocol,
+            config: None,
         })
     }
 }
 
-#[async_trait::async_trait]
 impl<'a> FromRequest<'a> for WebSocket {
     async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self> {
         Self::internal_from_request(req).await.map_err(Into::into)
@@ -78,7 +83,7 @@ impl WebSocket {
     ///
     /// ```
     /// use futures_util::{SinkExt, StreamExt};
-    /// use poem::{get, handler, web::websocket::WebSocket, IntoResponse, Route};
+    /// use poem::{IntoResponse, Route, get, handler, web::websocket::WebSocket};
     ///
     /// #[handler]
     /// async fn index(ws: WebSocket) -> impl IntoResponse {
@@ -104,6 +109,14 @@ impl WebSocket {
                 .into(),
         );
         self
+    }
+
+    /// Set the WebSocket configuration.
+    pub fn config(self, config: WebSocketConfig) -> Self {
+        Self {
+            config: Some(config),
+            ..self
+        }
     }
 
     /// Finalize upgrading the connection and call the provided `callback` with
@@ -195,9 +208,12 @@ where
                 Err(_) => return,
             };
 
-            let stream =
-                tokio_tungstenite::WebSocketStream::from_raw_socket(upgraded, Role::Server, None)
-                    .await;
+            let stream = tokio_tungstenite::WebSocketStream::from_raw_socket(
+                upgraded,
+                Role::Server,
+                self.websocket.config,
+            )
+            .await;
             (self.callback)(WebSocketStream::new(stream)).await;
         });
 
